@@ -78,3 +78,9 @@
 - Windows 下 Codex 沙箱 `windowsSandbox/readiness` 报 `updateRequired`, 未经管理员准备时隔离较弱(命令可执行、可落盘)。
 - 事件接口默认 SSE; 一次性回放使用 `?format=json` 或 `Accept: application/json`。
 - `node:sqlite` 在 Node 24 仍是实验 API, 跨大版本升级需回归。
+
+## 仓库
+
+- 源码仓库: <https://github.com/cunyu999/harness-hub>(private, 默认分支 `main`), 2026-11-04 由用户授权后首次推送。
+- 纳入版本控制: 源码(`apps/`、`packages/`)、测试(`tests/`)、文档与截图(`docs/`)、`package.json` + `package-lock.json`、`tsconfig.json`、`SYSTEM_BLUEPRINT.md`、`THIRD-PARTY-NOTICES.md`。
+- 排除: `.local/`(数据库、工作区、日志、凭据副本)、`node_modules/`、`dist/`、`apps/web/dist/`、`.npmrc`(含本机绝对缓存路径)、`START_HERE.md`(对话交接说明)。
