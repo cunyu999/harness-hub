@@ -1,0 +1,101 @@
+import type { TaskSnapshot } from '../../../packages/contracts/src/events';
+import type { ArtifactDto, ProfileDto, ReviewBundle, SessionDto, TaskListItem } from '../../../packages/contracts/src/api';
+import type { EventEnvelope } from '../../../packages/contracts/src/events';
+import type { ExecutionProfile, TaskRecord } from '../../../packages/contracts/src/types';
+
+export interface ApiErrorBody {
+  code: string;
+  message: string;
+  details?: unknown;
+  correlationId?: string;
+}
+
+export class ApiError extends Error {
+  constructor(
+    readonly status: number,
+    readonly body: ApiErrorBody,
+  ) {
+    super(body.message || `HTTP ${status}`);
+  }
+}
+
+async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+  const res = await fetch(path, {
+    method,
+    headers: body === undefined ? {} : { 'content-type': 'application/json' },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const text = await res.text();
+  const json = text ? (JSON.parse(text) as unknown) : null;
+  if (!res.ok) {
+    const body = (json ?? { code: 'http_error', message: text }) as ApiErrorBody;
+    throw new ApiError(res.status, body);
+  }
+  return json as T;
+}
+
+export type TaskDetail = Omit<TaskSnapshot, 'profiles' | 'artifacts'> & {
+  artifacts: ArtifactDto[];
+  profiles: ProfileDto[];
+  /** 任务工作区绝对路径。 */
+  workspace: string;
+};
+
+export interface HealthInfo {
+  ok: boolean;
+  version: string;
+  uptimeSeconds: number;
+  liveSessions: number;
+  adapters: { id: string; displayName: string; mock: boolean }[];
+}
+
+export interface ProbeResponse {
+  result: {
+    ok: boolean;
+    mode: string;
+    checkedAt: string;
+    executableResolved: string;
+    version?: string;
+    protocol?: string;
+    detail?: string;
+    capability?: { capabilities: Record<string, { state: string; evidence?: string }>; notes?: string[] };
+    warnings?: string[];
+  };
+  home?: { dir: string; copied: string[]; warnings: string[]; sourceHome?: string | null };
+}
+
+export const api = {
+  health: () => request<HealthInfo>('GET', '/api/health'),
+  listTasks: () => request<(TaskListItem & { artifactCount?: number })[]>('GET', '/api/tasks'),
+  getTask: (id: string) => request<TaskDetail>('GET', `/api/tasks/${id}`),
+  createTask: (input: Record<string, unknown>) => request<{ task: TaskRecord; snapshot: TaskSnapshot }>('POST', '/api/tasks', input),
+  requestPlan: (id: string, reason: string, supplement?: string) =>
+    request<{ status: string }>('POST', `/api/tasks/${id}/plan`, { reason, supplement }),
+  planDecision: (id: string, body: Record<string, unknown>) =>
+    request<{ decision: string; task: TaskRecord }>('POST', `/api/tasks/${id}/plan-decisions`, body),
+  sendMessage: (id: string, body: { text: string; intent: string }) =>
+    request<{ messageId: string }>('POST', `/api/tasks/${id}/messages`, body),
+  control: (id: string, action: string, sessionId?: string, reason?: string) =>
+    request<{ status: string }>('POST', `/api/tasks/${id}/controls`, {
+      action,
+      targetSessionId: sessionId,
+      reason,
+    }),
+  events: (id: string, after: number) =>
+    request<{ events: EventEnvelope[]; highWaterSeq: number }>('GET', `/api/tasks/${id}/events?format=json&after=${after}`),
+  reviews: (id: string) => request<ReviewBundle>('GET', `/api/tasks/${id}/reviews`),
+  artifacts: (id: string) => request<ArtifactDto[]>('GET', `/api/tasks/${id}/artifacts`),
+  session: (id: string) => request<SessionDto>('GET', `/api/sessions/${id}`),
+  cancelSession: (id: string) => request<{ status: string }>('POST', `/api/sessions/${id}/cancel`),
+  resolveApproval: (id: string, body: Record<string, unknown>) =>
+    request<{ status: string }>('POST', `/api/approvals/${id}/resolve`, body),
+  listProfiles: () => request<ProfileDto[]>('GET', '/api/profiles'),
+  createProfile: (body: Record<string, unknown>) => request<ProfileDto>('POST', '/api/profiles', body),
+  patchProfile: (id: string, body: Record<string, unknown>) => request<ProfileDto>('PATCH', `/api/profiles/${id}`, body),
+  deleteProfile: (id: string) => request<{ status: string }>('DELETE', `/api/profiles/${id}`),
+  probeProfile: (id: string, mode: 'inspect' | 'live') =>
+    request<ProbeResponse>('POST', `/api/profiles/${id}/probe`, { mode }),
+  capabilities: () => request<{ adapters: { id: string; displayName: string; mock: boolean }[] }>('GET', '/api/adapters'),
+};
+
+export type { ExecutionProfile, TaskSnapshot, EventEnvelope, ProfileDto, ArtifactDto, ReviewBundle };

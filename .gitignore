@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.local/
+apps/web/dist/
+*.log
+.DS_Store
+Thumbs.db
+START_HERE.md
+.npmrc

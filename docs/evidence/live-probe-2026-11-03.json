@@ -1,0 +1,206 @@
+{
+  "checkedAt": "2026-11-03T17:28:46.911Z",
+  "probes": [
+    {
+      "target": {
+        "id": "prof_59d146218bc84b86abc9",
+        "name": "Claude Code",
+        "role": "强模型/主控"
+      },
+      "status": 200,
+      "elapsedMs": 3961,
+      "result": {
+        "result": {
+          "ok": true,
+          "mode": "live",
+          "checkedAt": "2026-11-03T17:28:29.539Z",
+          "executableResolved": "D:\\1hobby\\node_modules\\@anthropic-ai\\claude-code\\bin\\claude.exe",
+          "version": "2.1.317",
+          "protocol": "claude-agent-sdk (原生 CLI 子进程)",
+          "detail": "2.1.317 (Claude Code); 已执行真实回合",
+          "capability": {
+            "adapterId": "claude-code",
+            "checkedAt": "2026-11-03T17:28:29.539Z",
+            "protocolVersion": "agent-sdk/0.3",
+            "executable": "D:\\1hobby\\node_modules\\@anthropic-ai\\claude-code\\bin\\claude.exe",
+            "version": "2.1.317",
+            "capabilities": {
+              "structuredOutput": {
+                "state": "supported",
+                "evidence": "outputFormat/json_schema 与提示层约束"
+              },
+              "streamMessages": {
+                "state": "supported",
+                "evidence": "includePartialMessages + stream_event"
+              },
+              "toolEvents": {
+                "state": "supported",
+                "evidence": "assistant tool_use / user tool_result"
+              },
+              "approvals": {
+                "state": "supported",
+                "evidence": "canUseTool 回调"
+              },
+              "userInput": {
+                "state": "supported",
+                "evidence": "canUseTool 输入请求"
+              },
+              "cancellation": {
+                "state": "supported",
+                "evidence": "abortController + interrupt()"
+              },
+              "nativeResume": {
+                "state": "supported",
+                "evidence": "options.resume = session_id"
+              },
+              "modelSelection": {
+                "state": "supported",
+                "evidence": "options.model / setModel"
+              },
+              "reasoningSelection": {
+                "state": "supported",
+                "evidence": "options.effort / thinking"
+              },
+              "imageInput": {
+                "state": "supported",
+                "evidence": "内容块支持图片"
+              },
+              "fileInput": {
+                "state": "supported",
+                "evidence": "Read 工具与附件"
+              },
+              "skills": {
+                "state": "supported",
+                "evidence": "options.skills / settingSources"
+              },
+              "mcp": {
+                "state": "supported",
+                "evidence": "options.mcpServers"
+              },
+              "workspaceRestriction": {
+                "state": "supported",
+                "evidence": "cwd + canUseTool 路径校验 + 原生 sandbox 设置"
+              },
+              "reportedModelIdentity": {
+                "state": "supported",
+                "evidence": "system/init 的 model 与 session_id"
+              }
+            },
+            "notes": [
+              "使用项目内 claude.exe, 配置目录指向 .local/homes 下的私有目录",
+              "Windows 上 Bash 工具可用性取决于本机 Git Bash / WSL 环境"
+            ]
+          },
+          "warnings": [
+            "live 回合状态: completed"
+          ]
+        },
+        "home": {
+          "dir": "D:\\1hobby\\.local\\homes\\claude-prof_59d146218bc84b86abc9",
+          "copied": [],
+          "warnings": [],
+          "sourceHome": "%USERPROFILE%\\.claude"
+        }
+      }
+    },
+    {
+      "target": {
+        "id": "prof_cf43975283a74cc5a5ac",
+        "name": "DeepSeek Harness",
+        "role": "弱模型/执行者"
+      },
+      "status": 200,
+      "elapsedMs": 13443,
+      "result": {
+        "result": {
+          "ok": true,
+          "mode": "live",
+          "checkedAt": "2026-11-03T17:28:40.409Z",
+          "executableResolved": "E:\\nodejs\\node.exe",
+          "version": null,
+          "protocol": "ACP over stdio (protocolVersion=1)",
+          "detail": "握手成功; 真实回合结束 (stopReason=end_turn)",
+          "capability": {
+            "adapterId": "dsh",
+            "checkedAt": "2026-11-03T17:28:40.409Z",
+            "protocolVersion": "1",
+            "executable": "E:\\nodejs\\node.exe",
+            "capabilities": {
+              "structuredOutput": {
+                "state": "supported",
+                "evidence": "提示层 JSON 约束 + ACP 文本流"
+              },
+              "streamMessages": {
+                "state": "supported",
+                "evidence": "session/update agent_message_chunk"
+              },
+              "toolEvents": {
+                "state": "supported",
+                "evidence": "session/update tool_call / tool_call_update"
+              },
+              "approvals": {
+                "state": "supported",
+                "evidence": "session/request_permission"
+              },
+              "userInput": {
+                "state": "unknown",
+                "evidence": "ACP elicitation 不支持"
+              },
+              "cancellation": {
+                "state": "supported",
+                "evidence": "session/cancel + $/cancel_request"
+              },
+              "nativeResume": {
+                "state": "supported",
+                "evidence": "session/resume"
+              },
+              "modelSelection": {
+                "state": "supported",
+                "evidence": "session/set_config_option(model)"
+              },
+              "reasoningSelection": {
+                "state": "supported",
+                "evidence": "session/set_config_option(reasoning_effort)"
+              },
+              "imageInput": {
+                "state": "supported",
+                "evidence": "ACP prompt content (image)"
+              },
+              "fileInput": {
+                "state": "supported",
+                "evidence": "ACP resource_link / 工具读取"
+              },
+              "skills": {
+                "state": "supported",
+                "evidence": "由 DSH profile 加载"
+              },
+              "mcp": {
+                "state": "supported",
+                "evidence": "session/new mcpServers"
+              },
+              "workspaceRestriction": {
+                "state": "supported",
+                "evidence": "session/new cwd (必须绝对路径)"
+              },
+              "reportedModelIdentity": {
+                "state": "unknown",
+                "evidence": "profile 配置行 provider/model"
+              }
+            },
+            "notes": [
+              "使用 `dsh --profile acp` 的自动化 ACP 入口, 不使用 TUI/headless 文本模式",
+              "DSH_HOME 指向项目内私有目录, 需要预先放置凭据副本"
+            ]
+          },
+          "warnings": []
+        },
+        "home": {
+          "dir": "D:\\1hobby\\.local\\homes\\dsh-prof_cf43975283a74cc5a5ac",
+          "copied": [],
+          "warnings": [],
+          "sourceHome": "%USERPROFILE%\\.dsh"
+        }
+      }
+    }
+  ]
+}

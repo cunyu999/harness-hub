@@ -1,0 +1,44 @@
+{
+  "name": "harness-hub",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "多 Harness 统一调度系统 (Codex / Claude Code / DeepSeek Harness)",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "build": "npm run build:server && npm run build:web",
+    "build:server": "tsc -p tsconfig.json",
+    "build:web": "vite build --config apps/web/vite.config.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "start": "node dist/apps/server/src/index.js",
+    "test": "npm run build:server && node --test \"dist/tests/**/*.test.js\"",
+    "dev:web": "vite --config apps/web/vite.config.ts",
+    "dev:server": "node --watch dist/apps/server/src/index.js",
+    "typecheck:web": "tsc -p apps/web/tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@agentclientprotocol/sdk": "^1.4.0",
+    "@anthropic-ai/claude-agent-sdk": "0.3.317",
+    "@anthropic-ai/claude-code": "^2.1.317",
+    "@deepseek-ai/dsh": "0.2.1-rc.5",
+    "@openai/codex": "0.166.0",
+    "@openai/codex-sdk": "^0.166.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "zod": "^4.1.12"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "@types/react": "^19.2.2",
+    "@types/react-dom": "^19.2.2",
+    "@vitejs/plugin-react": "^5.1.0",
+    "typescript": "^5.9.3",
+    "vite": "^7.1.12"
+  },
+  "engines": {
+    "node": ">=24.0.0"
+  }
+}
