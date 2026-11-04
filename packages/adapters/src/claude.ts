@@ -24,8 +24,8 @@ import { newId } from '../../core/src/util.js';
 import { resolveClaudeBinary } from './exec.js';
 
 export interface ClaudeAdapterOptions {
-  /** 项目内 claude 原生可执行文件路径 */
-  executable: string;
+  /** 可选兜底可执行文件; 不填时优先执行配置/PATH, 都没有就用 SDK 自带的可执行文件 */
+  executable?: string;
   /** 项目内私有配置根目录 */
   configRoot: string;
   defaultTimeoutMs?: number;
@@ -51,11 +51,15 @@ export class ClaudeAdapter implements HarnessAdapter {
    * Claude Code 的 SDK 需要真正的可执行文件, 不能是 .cmd/.ps1 垫片。
    * 这里允许执行配置指向本机已装的 claude(.cmd 会自动解析出真实 exe), 留空则先找 PATH, 再退回项目内安装的版本。
    */
-  private resolveExe(profile: ExecutionProfile): { executable: string; source: 'profile' | 'path' | 'vendored'; note?: string } {
+  private resolveExe(profile: ExecutionProfile): {
+    executable: string | null;
+    source: 'profile' | 'path' | 'sdk';
+    note?: string;
+  } {
     return resolveClaudeBinary(profile.executableRef, this.opts.executable);
   }
 
-  private executableFor(profile: ExecutionProfile): string {
+  private executableFor(profile: ExecutionProfile): string | null {
     return this.resolveExe(profile).executable;
   }
 
@@ -65,41 +69,46 @@ export class ClaudeAdapter implements HarnessAdapter {
     const exe = resolved.executable;
     const warnings: string[] = [];
     if (resolved.note) warnings.push(resolved.note);
+    if (!exe) warnings.push('未检测到本机 claude, 使用 SDK 自带的可执行文件');
     let version: string | null = null;
     let versionDetail = '';
-    try {
-      accessSync(exe, constants.X_OK);
-    } catch {
-      // Windows 上 X_OK 检查经常失败, 交给后续执行判断
-    }
-    try {
-      const out = await new Promise<string>((resolve, reject) => {
-        execFile(exe, ['--version'], { timeout: 20000, windowsHide: true }, (err, stdout) => {
-          if (err) reject(err);
-          else resolve(stdout);
+    if (exe) {
+      try {
+        accessSync(exe, constants.X_OK);
+      } catch {
+        // Windows 上 X_OK 检查经常失败, 交给后续执行判断
+      }
+      try {
+        const out = await new Promise<string>((resolve, reject) => {
+          execFile(exe, ['--version'], { timeout: 20000, windowsHide: true }, (err, stdout) => {
+            if (err) reject(err);
+            else resolve(stdout);
+          });
         });
-      });
-      version = /(\d+\.\d+\.\d+)/.exec(out)?.[1] ?? out.trim().slice(0, 40);
-      versionDetail = out.trim().split('\n')[0] ?? '';
-    } catch (err) {
-      return {
-        ok: false,
-        mode,
-        checkedAt,
-        executableResolved: exe,
-        version: null,
-        protocol: null,
-        detail: `无法执行 ${exe}: ${(err as Error).message.slice(0, 300)}`,
-        capability: null,
-        warnings,
-      };
+        version = /(\d+\.\d+\.\d+)/.exec(out)?.[1] ?? out.trim().slice(0, 40);
+        versionDetail = out.trim().split('\n')[0] ?? '';
+      } catch (err) {
+        return {
+          ok: false,
+          mode,
+          checkedAt,
+          executableResolved: exe,
+          version: null,
+          protocol: null,
+          detail: `无法执行 ${exe}: ${(err as Error).message.slice(0, 300)}`,
+          capability: null,
+          warnings,
+        };
+      }
+    } else {
+      versionDetail = 'SDK 自带可执行文件';
     }
 
     const capability: CapabilityReport = {
       adapterId: 'claude-code',
       checkedAt,
       protocolVersion: 'agent-sdk/0.3',
-      executable: exe,
+      executable: exe ?? undefined,
       version: version ?? undefined,
       capabilities: {
         structuredOutput: { state: 'supported', evidence: 'outputFormat/json_schema 与提示层约束' },
@@ -201,7 +210,7 @@ export class ClaudeAdapter implements HarnessAdapter {
         options: {
           cwd: profile.workspaceRoot,
           model: profile.requestedModel ?? undefined,
-          pathToClaudeCodeExecutable: this.executableFor(profile),
+          ...(this.executableFor(profile) ? { pathToClaudeCodeExecutable: this.executableFor(profile) as string } : {}),
           env: this.sessionEnv(profile, {}),
           abortController: controller,
           permissionMode: 'default',
@@ -252,7 +261,7 @@ export class ClaudeAdapter implements HarnessAdapter {
 
   async openSession(opts: OpenSessionOptions, host: AdapterHost): Promise<AdapterSession> {
     return new ClaudeSession(opts, host, {
-      executable: this.executableFor(opts.profile),
+      executable: this.executableFor(opts.profile) ?? undefined,
       env: this.sessionEnv(opts.profile, opts.env),
       defaultTimeoutMs: this.opts.defaultTimeoutMs ?? 30 * 60_000,
     });
@@ -264,7 +273,7 @@ export class ClaudeAdapter implements HarnessAdapter {
 }
 
 interface ClaudeSessionDeps {
-  executable: string;
+  executable?: string;
   env: Record<string, string>;
   defaultTimeoutMs: number;
 }
@@ -305,7 +314,7 @@ class ClaudeSession implements AdapterSession {
             pid: this.lastPid,
             startedAt: new Date().toISOString(),
             runtimeNonce: this.localId,
-            command: this.deps.executable,
+            command: this.deps.executable ?? 'claude (SDK 内置)',
           }
         : null,
       connectionState: this.closed ? 'disconnected' : 'connected',

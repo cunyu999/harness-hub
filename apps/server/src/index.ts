@@ -18,20 +18,13 @@ import { ApiServer } from './http.js';
 import { UiWatchdog } from './runtime-control.js';
 
 function buildAdapters(cfg: AppConfig): Record<string, HarnessAdapter> {
-  const nm = path.join(cfg.root, 'node_modules');
+  // 不内置任何 harness 副本: 默认只用本机已安装的 codex / claude / dsh(PATH 或执行配置里填的路径)。
+  // 这样用户的认证与模型配置都在自己那份安装里, 不会出现"项目里又下了一份"的问题。
+  void cfg;
   return {
-    codex: new CodexAdapter({
-      entry: path.join(nm, '@openai', 'codex', 'bin', 'codex.js'),
-      homeRoot: cfg.homesDir,
-    }),
-    'claude-code': new ClaudeAdapter({
-      executable: path.join(nm, '@anthropic-ai', 'claude-code', 'bin', 'claude.exe'),
-      configRoot: cfg.homesDir,
-    }),
-    dsh: new DshAdapter({
-      entry: path.join(nm, '@deepseek-ai', 'dsh', 'lib', 'bin.js'),
-      homeRoot: cfg.homesDir,
-    }),
+    codex: new CodexAdapter({ homeRoot: cfg.homesDir }),
+    'claude-code': new ClaudeAdapter({ configRoot: cfg.homesDir }),
+    dsh: new DshAdapter({ homeRoot: cfg.homesDir }),
     mock: new MockAdapter(),
   };
 }
@@ -40,14 +33,13 @@ function buildAdapters(cfg: AppConfig): Record<string, HarnessAdapter> {
 function seedProfiles(repo: Repo, cfg: AppConfig): void {
   if (process.env.HH_SEED_PROFILES === '0') return;
   if (repo.listProfiles().length > 0) return;
-  const nm = path.join(cfg.root, 'node_modules');
   const home = os.homedir();
   const now = nowIso();
   const seeds = [
     {
       name: 'Codex (gpt-6.1-sol)',
       adapterId: 'codex' as const,
-      executableRef: path.join(nm, '@openai', 'codex', 'bin', 'codex.js'),
+      executableRef: '',
       configRefs: { sourceHome: path.join(home, '.codex') },
       requestedModel: 'gpt-6.1-sol',
       requestedReasoning: 'medium',
@@ -56,7 +48,7 @@ function seedProfiles(repo: Repo, cfg: AppConfig): void {
     {
       name: 'Claude Code',
       adapterId: 'claude-code' as const,
-      executableRef: path.join(nm, '@anthropic-ai', 'claude-code', 'bin', 'claude.exe'),
+      executableRef: '',
       configRefs: { sourceHome: path.join(home, '.claude') },
       requestedModel: null,
       requestedReasoning: null,
@@ -65,11 +57,12 @@ function seedProfiles(repo: Repo, cfg: AppConfig): void {
     {
       name: 'DeepSeek Harness',
       adapterId: 'dsh' as const,
-      executableRef: path.join(nm, '@deepseek-ai', 'dsh', 'lib', 'bin.js'),
+      executableRef: '',
       configRefs: { sourceHome: path.join(home, '.dsh') },
       requestedModel: null,
       requestedReasoning: null,
-      notes: '首次运行自动探测生成。通过 dsh --profile acp 接入; 凭据从 ~/.dsh 复制到项目内私有 home。',
+      notes:
+        '首次运行自动探测生成。通过 dsh --profile acp 接入; 需要本机已安装 dsh(npm i -g @deepseek-ai/dsh); 凭据从 ~/.dsh 复制到项目内私有 home。',
     },
   ];
   for (const s of seeds) {

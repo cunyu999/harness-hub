@@ -81,7 +81,12 @@
   `.js`(node 执行)、`.exe`(直接 spawn)、`.cmd|.bat`(经 cmd.exe)、`.ps1`(经 powershell) 四类包装。
   Claude Code 额外要求真实 exe, 会从 `.cmd` 垫片里解析出 `claude.exe`。
 - 理由: 用户已有配置(认证、cc-switch 配的模型)都在自己那份安装里; 强制项目副本等于让用户重配一遍,
-  而且版本会漂移。项目内副本仍保留为**兜底**(默认值), 保证"clone 下来就能跑"。
+  而且版本会漂移、体积翻倍(三个 harness 合计约 900MB)。
+- 决定: **不再保留项目内副本**, 也不再把 `@openai/codex` / `@anthropic-ai/claude-code` / `@deepseek-ai/dsh`
+  列为依赖。唯一的例外是 `@anthropic-ai/claude-agent-sdk`, 它是 Claude Code 的**库**(自带平台二进制),
+  适配器直接调用 SDK, 不是"再装一份 CLI"。
+- 代价: 全新的机器上必须先自己装 harness(`npm i -g @openai/codex` 等), 否则探针会明确失败并给出安装命令;
+  这比"悄悄用项目里那份不同版本"更可控。
 - 取舍: 项目内仍会下载一份依赖(约 300MB+), 但不再强制使用; 如果用户只想用本机版本, 可以把入口指向 PATH 命令。
   `exec.ts` 增加了对 Windows 垫片的处理, 也带来一点平台相关逻辑(已在文档与测试中标注)。
 

@@ -54,15 +54,17 @@ export function whichSync(name: string): string | null {
  */
 export function resolveLauncher(
   ref: string | null | undefined,
-  fallback: { name?: string; path?: string } = {},
+  fallback: { name?: string; path?: string; installHint?: string } = {},
 ): Launcher {
   const raw = (ref ?? '').trim();
   if (!raw) {
     const found = fallback.name ? whichSync(fallback.name) : null;
     if (found) return fromPath(found);
     if (fallback.path && isFile(fallback.path)) return fromPath(fallback.path);
+    const name = fallback.name ?? 'harness';
+    const hint = fallback.installHint ?? name;
     throw new Error(
-      `找不到 ${fallback.name ?? 'harness'} 可执行文件: PATH 里没有, 项目内也没有 ${fallback.path ?? ''}`,
+      `PATH 里找不到 ${name}: 请先安装它(例如 npm i -g ${hint}), 或在「执行配置 → 可执行入口」填绝对路径`,
     );
   }
   const maybe = isFile(raw) ? raw : whichSync(raw);
@@ -96,8 +98,8 @@ function fromPath(p: string): Launcher {
  */
 export function resolveClaudeBinary(
   ref: string | null | undefined,
-  fallbackPath: string,
-): { executable: string; source: 'profile' | 'path' | 'vendored'; note?: string } {
+  fallbackPath?: string | null,
+): { executable: string | null; source: 'profile' | 'path' | 'sdk'; note?: string } {
   const raw = (ref ?? '').trim();
   const candidate = raw ? (isFile(raw) ? raw : whichSync(raw)) : whichSync('claude');
   if (candidate) {
@@ -107,22 +109,24 @@ export function resolveClaudeBinary(
       const exe = exeFromShim(candidate);
       if (exe) return { executable: exe, source: raw ? 'profile' : 'path', note: `由 ${path.basename(candidate)} 解析` };
       return {
-        executable: fallbackPath,
-        source: 'vendored',
-        note: `无法从 ${path.basename(candidate)} 解析出真实 exe, 改用项目内安装的版本`,
+        executable: fallbackPath ?? null,
+        source: fallbackPath ? 'profile' : 'sdk',
+        note: fallbackPath
+          ? `无法从 ${path.basename(candidate)} 解析出真实 exe, 改用配置里的 ${path.basename(fallbackPath)}`
+          : `无法从 ${path.basename(candidate)} 解析出真实 exe`,
       };
     }
     if (lower.endsWith('.js') || lower.endsWith('.mjs')) {
       return {
-        executable: fallbackPath,
-        source: 'vendored',
-        note: 'Claude Code 需要原生可执行文件, 不能指向 js 入口, 已改用项目内安装的版本',
+        executable: fallbackPath ?? null,
+        source: fallbackPath ? 'profile' : 'sdk',
+        note: 'Claude Code 需要原生可执行文件, 不能指向 js 入口',
       };
     }
     return { executable: candidate, source: raw ? 'profile' : 'path' };
   }
-  if (isFile(fallbackPath)) return { executable: fallbackPath, source: 'vendored' };
-  throw new Error(`找不到 Claude Code 可执行文件(PATH 里没有 claude, 项目内也没有 ${fallbackPath})`);
+  if (fallbackPath && isFile(fallbackPath)) return { executable: fallbackPath, source: 'profile' };
+  return { executable: null, source: 'sdk', note: '未检测到本机 claude, 使用 SDK 自带的可执行文件' };
 }
 
 /** 从 npm 生成的 `.cmd`/`.bat` 垫片里找出它最终调用的 exe。 */

@@ -25,7 +25,8 @@ import { resolveLauncher } from './exec.js';
 
 export interface DshAdapterOptions {
   /** dsh CLI 入口 (项目内 node_modules/@deepseek-ai/dsh/lib/bin.js) */
-  entry: string;
+  /** 可选兜底入口; 不填则只用执行配置里填的路径或 PATH 里的 dsh */
+  entry?: string;
   /** 项目内私有 DSH_HOME 根目录 */
   homeRoot: string;
   defaultTimeoutMs?: number;
@@ -52,7 +53,7 @@ export class DshAdapter implements HarnessAdapter {
 
   private spawnSpec(profile: ExecutionProfile): { command: string; args: string[]; entry: string } {
     // 支持项目内 js 入口 / 本机已安装的 dsh(PATH 或 .cmd/.ps1/.exe) / 留空自动探测
-    const launcher = resolveLauncher(profile.executableRef, { name: 'dsh', path: this.opts.entry });
+    const launcher = resolveLauncher(profile.executableRef, { name: 'dsh', path: this.opts.entry, installHint: '@deepseek-ai/dsh' });
     return { command: launcher.command, args: [...launcher.prefix, '--profile', 'acp'], entry: launcher.entry };
   }
 
@@ -73,6 +74,26 @@ export class DshAdapter implements HarnessAdapter {
   }
 
   async probe(profile: ExecutionProfile, mode: 'inspect' | 'live'): Promise<ProbeResult> {
+    // 入口解析/进程启动失败必须是"探针失败", 不能把异常冒到 HTTP 层。
+    try {
+      return await this.probeRuntime(profile, mode);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return {
+        ok: false,
+        mode,
+        checkedAt: new Date().toISOString(),
+        executableResolved: profile.executableRef?.trim() ? profile.executableRef.trim() : null,
+        version: null,
+        protocol: null,
+        detail: message,
+        capability: null,
+        warnings: ['无法启动该 harness: 请先在「执行配置」里确认可执行入口, 或先在本机安装它'],
+      };
+    }
+  }
+
+  private async probeRuntime(profile: ExecutionProfile, mode: 'inspect' | 'live'): Promise<ProbeResult> {
     const checkedAt = new Date().toISOString();
     const warnings: string[] = [];
     const { command, args, entry } = this.spawnSpec(profile);
@@ -228,7 +249,7 @@ export class DshAdapter implements HarnessAdapter {
       spawnSpec: (p) => this.spawnSpec(p),
       childEnv: (p, extra) => this.childEnv(p, extra),
       defaultTimeoutMs: this.opts.defaultTimeoutMs ?? 30 * 60_000,
-      entry: this.opts.entry,
+      entry: this.opts.entry ?? '',
     });
   }
 
