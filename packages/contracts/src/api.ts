@@ -12,6 +12,10 @@ import type {
   TaskLimits,
   TaskPhase,
 } from './types.js';
+import { ADAPTER_IDS } from './types.js';
+
+/** 适配器 id 的单一事实来源: 新增 harness 时只需改 types.ts 的 AdapterId / ADAPTER_IDS。 */
+const adapterIdSchema = z.enum(ADAPTER_IDS as [AdapterId, ...AdapterId[]]);
 
 export interface ApiError {
   code: string;
@@ -34,7 +38,7 @@ export function isApiError(value: unknown): value is ApiError {
 
 export const ProfileCreateSchema = z.object({
   name: z.string().min(1).max(120),
-  adapterId: z.enum(['codex', 'claude-code', 'dsh', 'mock']),
+  adapterId: adapterIdSchema,
   executableRef: z.string().max(400).default(''),
   configRefs: z.record(z.string(), z.string()).default({}),
   secretRefs: z.array(z.string()).default([]),
