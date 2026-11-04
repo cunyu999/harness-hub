@@ -431,13 +431,16 @@ export function ProfilesPanel({
                     />
                   </div>
                   <div className="field">
-                    <label>模型(留空 = harness 默认)</label>
+                    <label>模型(留空 = 用 harness 自己的配置)</label>
                     <input
                       type="text"
                       value={draft.requestedModel}
                       onChange={(e) => setDraft({ ...draft, requestedModel: e.target.value })}
-                      placeholder="例如: gpt-6.1-sol"
+                      placeholder={modelHint(draft.adapterId)}
                     />
+                    <div className="field-hint">
+                      只对本程序发起的会话生效(会话级覆盖), 不改 harness 的配置文件; 填错会导致启动失败。
+                    </div>
                   </div>
                   <div className="field">
                     <label>推理强度(留空 = 默认)</label>
@@ -447,6 +450,7 @@ export function ProfilesPanel({
                       onChange={(e) => setDraft({ ...draft, requestedReasoning: e.target.value })}
                       placeholder="low / medium / high"
                     />
+                    <div className="field-hint">{reasoningHint(draft.adapterId)}</div>
                   </div>
                   <div className="field">
                     <label>并发组(同组内串行)</label>
@@ -617,6 +621,34 @@ function homeHint(adapterId: string): string {
       return '%USERPROFILE%/.dsh';
     default:
       return '不需要';
+  }
+}
+
+/** 模型字段只做会话级覆盖, 留空就用 harness 自己配置里的模型。 */
+function modelHint(adapterId: string): string {
+  switch (adapterId) {
+    case 'codex':
+      return '留空 = 用 config.toml 里的模型, 例如 gpt-6.1-sol';
+    case 'claude-code':
+      return '留空 = 用 cc-switch / settings.json 里的模型';
+    case 'dsh':
+      return '留空 = 用 cordis.yml 里的模型, 例如 deepseek-v4-flash';
+    default:
+      return 'mock 适配器回显该值';
+  }
+}
+
+/** 各 harness 对"推理强度"的支持程度不同, 这里如实说明, 避免用户以为一定生效。 */
+function reasoningHint(adapterId: string): string {
+  switch (adapterId) {
+    case 'codex':
+      return '传给 thread/start 的 effort; 取值以 Codex 支持为准(本程序未做 live 验证)。';
+    case 'claude-code':
+      return '传给 SDK 的 effort 选项; 实测填非法值不报错, 可能被 harness 忽略, 需要精确控制请用模型别名。';
+    case 'dsh':
+      return '通过 session/set_config_option(reasoning_effort) 下发; 非法值会直接报错, 说明该值确实生效。';
+    default:
+      return 'mock 适配器只回显, 不影响行为。';
   }
 }
 

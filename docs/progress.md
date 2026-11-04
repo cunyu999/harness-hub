@@ -54,6 +54,13 @@
   `lib/theme.ts` 提供 `useTheme()` 切换; 节点详情浮层改为不透明背景 + 400px 宽。
   mock 适配器在"≥2 个执行者"时生成互不依赖的工作项(`planFor()`), 用于演示并发, 单执行者仍串行。
 
+- 执行配置的"模型 / 推理强度"经真实调用核验并如实标注: 两字段都是**会话级覆盖**(Codex `thread/start`+`turn/start`、
+  Claude SDK `query({model, effort})`、DSH `session/set_config_option`), 不改 harness 配置文件; 留空即用 harness 自己的配置。
+  用非法值反证: Claude 模型报 `[claude-code:unrecognized_model]`(生效)、Claude `effort` 填非法值不报错(未验证/可能被忽略)、
+  DSH 模型与推理都报 `Invalid params: unknown ...`(均生效)、Codex 仅代码路径确认。证据在
+  `docs/evidence/model-override-2026-11-04.json`, 结论写进 `docs/compatibility.md` 与 web 面板字段提示。
+  同时收紧 live 探针: 只有真实回合成功才算通过(此前 Claude/Codex 无论成败都报 `ok:true`), 失败时带子进程 stderr 摘要。
+
 - 自动化测试 `tests/`: 31 项通过(`npm test`)。
   - `tests/core.test.ts` 14 项: 路径安全、计划校验(强制全部强模型审核/越界拒绝/未选参与者报错/依赖环/数量上限)、
     调度(依赖就绪、并发上限、每配置串行、写入范围冲突、死锁判定)。

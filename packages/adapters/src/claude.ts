@@ -115,23 +115,33 @@ export class ClaudeAdapter implements HarnessAdapter {
       ],
     };
 
+    let liveOk = true;
+    let liveError = '';
     if (mode === 'live') {
       try {
         const res = await this.runOneShot(profile, '只回复 OK 两个字母, 不要使用任何工具。', 90000);
-        warnings.push(`live 回合状态: ${res.status}`);
+        // 只有真实回合成功才算 live 通过: 进程能起来、认证能过, 但模型名不对时回合会失败,
+        // 这种情况必须报 ok:false, 否则"探针通过"会掩盖真实错误。
+        liveOk = res.status === 'completed';
+        warnings.push(liveOk ? `live 回合状态: ${res.status}` : `live 回合状态: ${res.status} ${res.errorMessage ?? ''}`.trim());
+        if (!liveOk) liveError = res.errorMessage ?? `回合状态 ${res.status}`;
       } catch (err) {
-        warnings.push(`live 回合失败: ${(err as Error).message.slice(0, 200)}`);
+        liveOk = false;
+        liveError = (err as Error).message;
+        warnings.push(`live 回合失败: ${liveError.slice(0, 200)}`);
       }
     }
 
     return {
-      ok: true,
+      ok: liveOk,
       mode,
       checkedAt,
       executableResolved: exe,
       version,
       protocol: 'claude-agent-sdk (原生 CLI 子进程)',
-      detail: `${versionDetail}${mode === 'live' ? '; 已执行真实回合' : '; 仅版本探测'}`,
+      detail: liveOk
+        ? `${versionDetail}${mode === 'live' ? '; 已执行真实回合' : '; 仅版本探测'}`
+        : `${versionDetail}; live 回合失败: ${liveError.slice(0, 160)}`,
       capability,
       warnings,
     };
@@ -173,6 +183,7 @@ export class ClaudeAdapter implements HarnessAdapter {
     let text = '';
     let status: TurnOutcome['status'] = 'unknown';
     let errorMessage: string | null = null;
+    let stderrTail = '';
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
       const { query } = await import('@anthropic-ai/claude-agent-sdk');
@@ -188,19 +199,30 @@ export class ClaudeAdapter implements HarnessAdapter {
           includePartialMessages: false,
           settingSources: ['user', 'project'],
           maxTurns: 4,
-          stderr: () => undefined,
+          // 把子进程 stderr 留下来: 模型名/鉴权失败时 CLI 只往 stderr 写原因,
+          // SDK 自己抛的往往只是 "Operation aborted"。
+          stderr: (line: string) => {
+            stderrTail = (stderrTail + line).slice(-600);
+          },
         } as never,
       });
-      for await (const msg of q) {
-        if (msg.type === 'assistant') {
-          const blocks = ((msg.message?.content ?? []) as unknown) as Record<string, unknown>[];
-          for (const b of blocks) if (b.type === 'text') text += String(b.text ?? '');
-        } else if (msg.type === 'result') {
-          const r = msg as unknown as Record<string, unknown>;
-          if (typeof r.result === 'string' && r.result.length > 0) text = r.result;
-          status = r.subtype === 'success' ? 'completed' : 'failed';
-          if (status === 'failed') errorMessage = String(r.subtype ?? 'result_error');
+      try {
+        for await (const msg of q) {
+          if (msg.type === 'assistant') {
+            const blocks = ((msg.message?.content ?? []) as unknown) as Record<string, unknown>[];
+            for (const b of blocks) if (b.type === 'text') text += String(b.text ?? '');
+          } else if (msg.type === 'result') {
+            const r = msg as unknown as Record<string, unknown>;
+            if (typeof r.result === 'string' && r.result.length > 0) text = r.result;
+            status = r.subtype === 'success' ? 'completed' : 'failed';
+            if (status === 'failed') errorMessage = String(r.subtype ?? 'result_error');
+          }
         }
+      } catch (err) {
+        status = 'failed';
+        const base = (err as Error).message || 'query_failed';
+        const tail = stderrTail.trim().replace(/\s+/g, ' ').slice(-240);
+        errorMessage = tail ? `${base}: ${tail}` : base;
       }
       void cfgDir;
       if (status === 'unknown') status = 'failed';

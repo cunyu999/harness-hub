@@ -952,6 +952,12 @@ table.grid tr:last-child td {
   font-weight: 500;
 }
 
+.field-hint {
+  font-size: 10.5px;
+  line-height: 1.45;
+  color: var(--text-3);
+}
+
 .field input[type='text'],
 .field textarea,
 .field select {

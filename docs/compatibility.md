@@ -25,6 +25,22 @@
 
 证据文件: `docs/evidence/live-probe-2026-11-03.json`。
 
+### 执行配置里的模型 / 推理强度如何生效
+
+执行配置面板里的**模型**与**推理强度**不会改写 harness 的配置文件, 只对**本程序发起的会话**做覆盖:
+
+| harness | 模型 | 推理强度 | 下发方式 |
+| --- | --- | --- | --- |
+| Codex | 会话级(代码路径已确认, 未 live 验证) | 会话级(同上) | `thread/start` / `turn/start` 的 `model` / `effort` 字段 |
+| Claude Code | **已验证生效**: 填不存在的模型会报 `[claude-code:unrecognized_model] {"model":"..."}` | **未验证**: 填非法值不报错, 可能被忽略 | Agent SDK `query({ options: { model, effort } })` |
+| DeepSeek Harness | **已验证生效**: 非法模型报 `unknown model option: ...` | **已验证生效**: 非法值报 `unknown reasoning effort for deepseek-official/deepseek-v4-flash: ...` | ACP `session/set_config_option` 的 `model` / `reasoning_effort` |
+
+- 留空即使用 harness 自己配置里的模型(例如 Codex 的 `config.toml`、Claude 的 `settings.json`/cc-switch、DSH 的 `cordis.yml`), 本程序不代管这些配置。
+- 因为 Claude Code 对 `effort` 字符串不校验, web 面板在该字段下如实标注"可能被忽略", 需要精确控制时请用模型别名或 harness 自己的配置。
+- 证据: `docs/evidence/model-override-2026-11-04.json`(用非法值反证参数确实下发, 再还原为空值确认恢复)。
+
+live 探针的判定同时在这次核验中收紧: 只有**真实回合成功**才算 `ok`(Claude `result.subtype=success`、DSH `stopReason=end_turn`、Codex `model/list` 非空), 失败会带子进程 stderr 摘要, 不再一律报成功。
+
 ## 已知限制
 
 1. Codex Windows 沙箱: `windowsSandbox/readiness` 返回 `updateRequired`, 未以管理员完成准备时隔离较弱。

@@ -86,6 +86,12 @@ npm run dev:web                              # 前端 4311, 代理 /api 到 4310
 
 同一个 harness 的多份配置各有自己的私有 home 与并发组, 可以分别给"主控""审查""执行"用。
 
+**关于模型与推理强度**: 面板里的这两项只对**本程序发起的会话**做覆盖, 不会改写 harness 的配置文件
+(Codex `config.toml`、Claude `settings.json`/cc-switch、DSH `cordis.yml` 仍归你自己管)。留空即用 harness 自己的配置。
+实测结论(详见 `docs/compatibility.md` 与 `docs/evidence/model-override-2026-11-04.json`):
+Claude Code 的模型覆盖已验证生效、推理强度填非法值不报错(可能被忽略); DSH 的模型与推理都已验证生效;
+Codex 仅代码路径确认, 未做 live 验证。
+
 ## 支持的 harness 与版本
 
 | Harness | 接入方式 | 已验证版本 | 说明 |

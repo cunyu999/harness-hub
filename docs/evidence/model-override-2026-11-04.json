@@ -1,0 +1,75 @@
+{
+  "topic": "执行配置里的模型 / 推理强度是否真的作用到 harness",
+  "recordedAt": "2026-11-04T21:50:00+08:00",
+  "method": "在网页/API 里把执行配置的模型或推理改成非法值, 再跑 live 探针, 看 harness 是否报出该值; 随后还原为空值并再次探针确认恢复。",
+  "cases": [
+    {
+      "adapter": "claude-code",
+      "profileId": "prof_59d146218bc84b86abc9",
+      "setting": "requestedModel='definitely-not-a-real-model-xyz'",
+      "probe": "live",
+      "ok": false,
+      "detail": "2.1.317 (Claude Code); live 回合失败: Operation aborted: [claude-code:unrecognized_model] {\"model\":\"definitely-not-a-real-model-xyz\",\"query_source\":\"sdk\"}",
+      "conclusion": "模型值确实传到了 Claude Code(错误信息里回显了该值), 模型是会话级覆盖, 不写 settings.json。"
+    },
+    {
+      "adapter": "claude-code",
+      "profileId": "prof_59d146218bc84b86abc9",
+      "setting": "requestedModel=null, requestedReasoning='ultra-bogus-effort'",
+      "probe": "live",
+      "ok": true,
+      "detail": "2.1.317 (Claude Code); 已执行真实回合",
+      "conclusion": "非法 effort 不报错, 说明 SDK/CLI 对 effort 字符串不校验, 无法证明该值生效 —— 推理强度对 Claude Code 记为未验证, UI 中已注明可能被忽略。"
+    },
+    {
+      "adapter": "claude-code",
+      "profileId": "prof_59d146218bc84b86abc9",
+      "setting": "requestedModel=null, requestedReasoning=null",
+      "probe": "live",
+      "ok": true,
+      "detail": "2.1.317 (Claude Code); 已执行真实回合",
+      "conclusion": "去掉覆盖后回到 harness 自身配置, 可正常跑。"
+    },
+    {
+      "adapter": "dsh",
+      "profileId": "prof_cf43975283a74cc5a5ac",
+      "setting": "requestedModel='no-such-model-xyz'",
+      "probe": "live",
+      "ok": false,
+      "detail": "握手成功; 真实回合失败: RPC session/set_config_option 失败: Invalid params: unknown model option: no-such-model-xyz",
+      "conclusion": "模型通过 ACP session/set_config_option 下发, 非法值被 DSH 拒绝并回显 —— 模型字段生效。"
+    },
+    {
+      "adapter": "dsh",
+      "profileId": "prof_cf43975283a74cc5a5ac",
+      "setting": "requestedModel=null, requestedReasoning='no-such-effort'",
+      "probe": "live",
+      "ok": false,
+      "detail": "握手成功; 真实回合失败: RPC session/set_config_option 失败: Invalid params: unknown reasoning effort for deepseek-official/deepseek-v4-flash: no-such-effort",
+      "conclusion": "推理强度同样是会话级下发, 非法值被拒绝并回显当前模型 deepseek-v4-flash —— 推理强度字段生效。"
+    },
+    {
+      "adapter": "dsh",
+      "profileId": "prof_cf43975283a74cc5a5ac",
+      "setting": "requestedModel=null, requestedReasoning=null",
+      "probe": "live",
+      "ok": true,
+      "detail": "握手成功; 真实回合结束 (stopReason=end_turn)",
+      "conclusion": "还原为空后使用 cordis.yml 的默认模型, 可正常跑。"
+    },
+    {
+      "adapter": "codex",
+      "profileId": "prof_cc72cde5b0c941348178",
+      "setting": "未做 live 验证(本轮未获授权调用 Codex)",
+      "probe": null,
+      "ok": null,
+      "detail": "代码路径: packages/adapters/src/codex.ts 的 thread/start 与 turn/start 会带 model / effort 参数。",
+      "conclusion": "仅代码级确认, 未 live 验证。"
+    }
+  ],
+  "sideFixes": [
+    "修掉 live 探针把失败报成 ok=true 的缺陷: 现在只有真实回合成功(Claude result=success, DSH stopReason=end_turn, Codex model/list 非空)才算 live 通过。",
+    "Claude 的 live 探针现在收集子进程 stderr, 错误信息里能看到 [claude-code:unrecognized_model] 这类真实原因, 而不是只有 'Operation aborted'。",
+    "DSH 的 live 探针现在会把执行配置里的模型/推理真正 set_config_option 进去再跑回合, 所以 live 通过同时证明该配置有效。"
+  ]
+}

@@ -105,24 +105,33 @@ export class CodexAdapter implements HarnessAdapter {
       const ua = String(init.userAgent ?? '');
       const version = /codex\/([\w.\-]+)/.exec(ua)?.[1] ?? /(\d+\.\d+\.\d+[\w.\-]*)/.exec(ua)?.[1] ?? null;
       let liveDetail = '未执行真实回合';
+      let liveOk = true;
+      let liveError = '';
       if (mode === 'live') {
         try {
           const models = await rpc.call<Record<string, unknown>>('model/list', {}, 20000);
           const arr = (models.data ?? models.models ?? []) as unknown[];
           liveDetail = `model/list 返回 ${arr.length} 个模型`;
+          // 有认证但一个模型都拿不到, 说明 provider/账号配置有问题, 不能算 live 通过。
+          if (arr.length === 0) {
+            liveOk = false;
+            liveError = 'model/list 返回 0 个模型';
+          }
         } catch (err) {
-          warnings.push(`model/list 失败: ${(err as Error).message.slice(0, 200)}`);
+          liveOk = false;
+          liveError = (err as Error).message;
+          warnings.push(`model/list 失败: ${liveError.slice(0, 200)}`);
           liveDetail = '认证或网络问题, 未能列出模型';
         }
       }
       return {
-        ok: true,
+        ok: liveOk,
         mode,
         checkedAt,
         executableResolved: command,
         version,
         protocol: 'codex app-server v2 (JSON-RPC over stdio)',
-        detail: `handshake 成功; ${liveDetail}`,
+        detail: liveOk ? `handshake 成功; ${liveDetail}` : `handshake 成功; ${liveDetail}: ${liveError.slice(0, 160)}`,
         capability: {
           adapterId: 'codex',
           checkedAt,

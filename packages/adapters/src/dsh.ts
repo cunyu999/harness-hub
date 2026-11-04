@@ -102,6 +102,8 @@ export class DshAdapter implements HarnessAdapter {
       const agentCaps = (init.agentCapabilities ?? {}) as Record<string, unknown>;
       const protocolVersion = init.protocolVersion ? String(init.protocolVersion) : 'unknown';
       let liveDetail = '未执行真实回合';
+      let liveOk = true;
+      const liveErrors: string[] = [];
       if (mode === 'live') {
         try {
           const s = await rpc.call<Record<string, unknown>>(
@@ -110,6 +112,22 @@ export class DshAdapter implements HarnessAdapter {
             60000,
           );
           if (s.sessionId) {
+            // 探针也要把执行配置里指定的模型/推理真正设进去: 否则"live 通过"只证明
+            // 默认模型能跑, 无法证明面板上的模型字段有效。
+            if (profile.requestedModel) {
+              await rpc.call(
+                'session/set_config_option',
+                { sessionId: s.sessionId, configId: 'model', value: profile.requestedModel },
+                20000,
+              );
+            }
+            if (profile.requestedReasoning) {
+              await rpc.call(
+                'session/set_config_option',
+                { sessionId: s.sessionId, configId: 'reasoning_effort', value: profile.requestedReasoning },
+                20000,
+              );
+            }
             // live 探针必须证明"认证 + 模型 + 一个真实回合"都能跑通, 否则无法区分
             // "会话建得起来" 和 "模型其实不可用"。
             const turn = await rpc.call<Record<string, unknown>>(
@@ -120,21 +138,30 @@ export class DshAdapter implements HarnessAdapter {
             const stopReason = String(turn.stopReason ?? 'unknown');
             await rpc.call('session/close', { sessionId: s.sessionId }, 15000).catch(() => undefined);
             liveDetail = `真实回合结束 (stopReason=${stopReason})`;
+            if (stopReason !== 'end_turn') {
+              liveOk = false;
+              liveErrors.push(`回合未正常结束 (stopReason=${stopReason})`);
+            }
+          } else {
+            liveOk = false;
+            liveErrors.push('session/new 未返回 sessionId');
           }
         } catch (err) {
-          warnings.push(`session/new 失败: ${(err as Error).message.slice(0, 200)}`);
-          liveDetail = '会话创建失败(可能是认证或 provider 配置)';
+          liveOk = false;
+          liveErrors.push((err as Error).message.slice(0, 200));
+          warnings.push(`live 回合失败: ${(err as Error).message.slice(0, 200)}`);
+          liveDetail = '真实回合失败';
         }
       }
       const loadSession = Boolean(agentCaps.loadSession);
       return {
-        ok: true,
+        ok: liveOk,
         mode,
         checkedAt,
         executableResolved: command,
         version: null,
         protocol: `ACP over stdio (protocolVersion=${protocolVersion})`,
-        detail: `握手成功; ${liveDetail}`,
+        detail: liveOk ? `握手成功; ${liveDetail}` : `握手成功; ${liveDetail}: ${liveErrors.join('; ').slice(0, 160)}`,
         capability: {
           adapterId: 'dsh',
           checkedAt,
