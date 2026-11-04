@@ -77,6 +77,8 @@ export type ProbeRequestInput = z.infer<typeof ProbeRequestSchema>;
 export interface ProfileDto extends ExecutionProfile {
   /** 由 probe 产生的最近一次检查结论。 */
   lastProbe: ProbeResultDto | null;
+  /** 被多少个任务参与者引用过(只读, 决定能否物理删除)。 */
+  usage?: number;
 }
 
 export interface ProbeResultDto {

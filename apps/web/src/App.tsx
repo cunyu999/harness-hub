@@ -282,7 +282,9 @@ export function App() {
           }}
         />
       ) : null}
-      {showProfiles ? <ProfilesPanel profiles={profiles} onChanged={() => { setShowProfiles(false); loadProfiles(); }} /> : null}
+      {showProfiles ? (
+        <ProfilesPanel profiles={profiles} onClose={() => setShowProfiles(false)} onChanged={loadProfiles} />
+      ) : null}
 
       {toast ? <div className="toast">{toast}</div> : null}
       {detail?.task.lifecycle === 'blocked' ? (

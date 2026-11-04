@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { ProfileDto } from '../api';
 import { api } from '../api';
+import { stamp } from '../lib/format';
 
 export function NewTaskDialog({
   profiles,
@@ -147,82 +148,479 @@ export function NewTaskDialog({
   );
 }
 
-export function ProfilesPanel({ profiles, onChanged }: { profiles: ProfileDto[]; onChanged: () => void }) {
-  const [busy, setBusy] = useState<string | null>(null);
-  const [msg, setMsg] = useState<Record<string, string>>({});
+export function ProfilesPanel({
+  profiles,
+  onClose,
+  onChanged,
+}: {
+  profiles: ProfileDto[];
+  onClose: () => void;
+  onChanged: () => void;
+}) {
+  const [adapters, setAdapters] = useState<{ id: string; displayName: string; mock: boolean }[]>([]);
+  const [selected, setSelected] = useState<string | null>(profiles[0]?.id ?? null);
+  const [draft, setDraft] = useState<Draft | null>(() => (profiles[0] ? toDraft(profiles[0]) : null));
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState<{ tone: 'ok' | 'bad' | 'muted'; text: string } | null>(null);
 
-  const probe = async (id: string, mode: 'inspect' | 'live') => {
-    setBusy(`${id}:${mode}`);
+  useEffect(() => {
+    void api
+      .capabilities()
+      .then((list) => setAdapters(Array.isArray(list) ? list : []))
+      .catch(() => setAdapters([]));
+  }, []);
+
+  // 选中项跟随外部刷新: 保留选中, 数据换了就同步到最新。
+  useEffect(() => {
+    if (!selected) return;
+    const fresh = profiles.find((p) => p.id === selected);
+    if (fresh) setDraft((prev) => (prev && prev.id === fresh.id ? toDraft(fresh) : prev));
+  }, [profiles, selected]);
+
+  const groups = useMemo(() => {
+    const order = adapters.length > 0 ? adapters.map((a) => a.id) : Array.from(new Set(profiles.map((p) => p.adapterId)));
+    const label = (id: string) => adapters.find((a) => a.id === id)?.displayName ?? id;
+    return order.map((id) => ({
+      id,
+      label: label(id),
+      items: profiles.filter((p) => p.adapterId === id),
+    }));
+  }, [adapters, profiles]);
+
+  const current = profiles.find((p) => p.id === selected) ?? null;
+
+  const pick = (p: ProfileDto) => {
+    setSelected(p.id);
+    setDraft(toDraft(p));
+    setNotice(null);
+  };
+
+  const startNew = (adapterId: string) => {
+    setSelected(null);
+    setDraft({
+      id: null,
+      name: '',
+      adapterId,
+      executableRef: '',
+      sourceHome: '',
+      requestedModel: '',
+      requestedReasoning: '',
+      concurrencyGroup: 'default',
+      envText: '',
+      notes: '',
+      liveEnabled: false,
+      enabled: true,
+    });
+    setNotice({ tone: 'muted', text: '填好名称与可执行入口后保存; 适配器一旦创建就不能改(避免会话漂移)。' });
+  };
+
+  const save = async () => {
+    if (!draft) return;
+    if (!draft.name.trim()) {
+      setNotice({ tone: 'bad', text: '名称不能为空' });
+      return;
+    }
+    setBusy(true);
+    setNotice(null);
     try {
-      const res = await api.probeProfile(id, mode);
+      const body: Record<string, unknown> = {
+        name: draft.name.trim(),
+        executableRef: draft.executableRef.trim(),
+        configRefs: draft.sourceHome.trim() ? { sourceHome: draft.sourceHome.trim() } : {},
+        requestedModel: draft.requestedModel.trim() || null,
+        requestedReasoning: draft.requestedReasoning.trim() || null,
+        concurrencyGroup: draft.concurrencyGroup.trim() || 'default',
+        env: parseEnv(draft.envText),
+        notes: draft.notes.trim() || null,
+        liveEnabled: draft.liveEnabled,
+        enabled: draft.enabled,
+      };
+      if (draft.id) {
+        await api.patchProfile(draft.id, body);
+        setNotice({ tone: 'ok', text: '已保存' });
+        onChanged();
+      } else {
+        const created = await api.createProfile({ ...body, adapterId: draft.adapterId });
+        setSelected(created.id);
+        setDraft(toDraft(created));
+        setNotice({ tone: 'ok', text: '已创建; 建议先跑 inspect 探针' });
+        onChanged();
+      }
+    } catch (e) {
+      setNotice({ tone: 'bad', text: errorText(e) });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const duplicate = async () => {
+    if (!draft) return;
+    setBusy(true);
+    try {
+      const created = await api.createProfile({
+        name: `${draft.name || '未命名'} 副本`,
+        adapterId: draft.adapterId,
+        executableRef: draft.executableRef.trim(),
+        configRefs: draft.sourceHome.trim() ? { sourceHome: draft.sourceHome.trim() } : {},
+        requestedModel: draft.requestedModel.trim() || null,
+        requestedReasoning: draft.requestedReasoning.trim() || null,
+        concurrencyGroup: draft.concurrencyGroup.trim() || 'default',
+        env: parseEnv(draft.envText),
+        notes: draft.notes.trim() || null,
+        enabled: true,
+        liveEnabled: false,
+      });
+      setSelected(created.id);
+      setDraft(toDraft(created));
+      setNotice({ tone: 'ok', text: '已复制为一份新配置(live 默认关闭)' });
+      onChanged();
+    } catch (e) {
+      setNotice({ tone: 'bad', text: errorText(e) });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const toggleEnabled = async (p: ProfileDto) => {
+    setBusy(true);
+    try {
+      await api.patchProfile(p.id, { enabled: !p.enabled });
+      onChanged();
+    } catch (e) {
+      setNotice({ tone: 'bad', text: errorText(e) });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const remove = async () => {
+    if (!draft?.id) return;
+    const name = draft.name || draft.id;
+    if (!window.confirm(`删除执行配置「${name}」?\n\n只影响这份配置本身; 已被任务引用过的配置只能停用, 不能删除。`)) return;
+    setBusy(true);
+    try {
+      await api.deleteProfile(draft.id, true);
+      setSelected(null);
+      setDraft(null);
+      setNotice({ tone: 'ok', text: '已删除' });
+      onChanged();
+    } catch (e) {
+      const text = errorText(e);
+      setNotice({
+        tone: 'bad',
+        text: text.includes('profile_in_use') ? '该配置被历史任务引用过, 只能停用(会保留在列表里并标灰)。' : text,
+      });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const probe = async (mode: 'inspect' | 'live') => {
+    if (!draft?.id || !current) return;
+    setBusy(true);
+    setNotice({ tone: 'muted', text: `${mode} 探针运行中…` });
+    try {
+      const res = await api.probeProfile(current.id, mode);
       const ok = res.result.ok;
-      setMsg((prev) => ({
-        ...prev,
-        [id]: `${mode} · ${ok ? '通过' : '未通过'} · ${res.result.version ?? '未取到版本'}${res.result.detail ? ' · ' + res.result.detail : ''}`,
-      }));
+      setNotice({
+        tone: ok ? 'ok' : 'bad',
+        text: `${mode} · ${ok ? '通过' : '未通过'} · ${res.result.version ?? '未取到版本'}${res.result.detail ? ' · ' + res.result.detail : ''}`,
+      });
       onChanged();
     } catch (e) {
-      setMsg((prev) => ({ ...prev, [id]: e instanceof Error ? e.message : String(e) }));
+      setNotice({ tone: 'bad', text: errorText(e) });
     } finally {
-      setBusy(null);
+      setBusy(false);
     }
   };
 
-  const toggleLive = async (p: ProfileDto) => {
-    setBusy(`${p.id}:live-toggle`);
-    try {
-      await api.patchProfile(p.id, { liveEnabled: !p.liveEnabled });
-      onChanged();
-    } catch (e) {
-      setMsg((prev) => ({ ...prev, [p.id]: e instanceof Error ? e.message : String(e) }));
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  const rows = useMemo(() => profiles, [profiles]);
+  const lastProbe = current?.lastProbe ?? null;
 
   return (
-    <div className="modal-backdrop" onClick={() => onChanged()}>
-      <div className="modal" onClick={(e) => e.stopPropagation()} style={{ width: 'min(820px, 100%)' }}>
-        <h3>执行配置</h3>
-        <div className="small muted">
-          inspect 只检查可执行文件与握手; live 会真实建立一次会话或调用。探针结论保存在配置记录里, 不改动快照。
-        </div>
-        <div style={{ marginTop: 12 }}>
-          {rows.map((p) => (
-            <div className="card" key={p.id}>
-              <div className="row" style={{ justifyContent: 'space-between' }}>
-                <strong>{p.name}</strong>
-                <span className="row">
-                  <span className={`chip ${p.liveEnabled ? 'green' : 'muted'}`}>{p.liveEnabled ? 'live 已启用' : 'live 未启用'}</span>
-                  <span className={`chip ${p.enabled ? 'cyan' : 'muted'}`}>{p.enabled ? '启用' : '停用'}</span>
-                </span>
-              </div>
-              <div className="mono muted" style={{ fontSize: 10.5, marginTop: 3 }}>
-                {p.adapterId} · {p.requestedModel || '默认模型'} · {p.requestedReasoning || '默认推理'} · {p.executableRef || '(无入口)'}
-              </div>
-              <div className="row" style={{ marginTop: 7 }}>
-                <button className="btn sm" disabled={busy !== null} onClick={() => void probe(p.id, 'inspect')}>
-                  inspect 探针
-                </button>
-                <button className="btn sm" disabled={busy !== null} onClick={() => void probe(p.id, 'live')}>
-                  live 探针
-                </button>
-                <button className="btn sm" disabled={busy !== null} onClick={() => void toggleLive(p)}>
-                  {p.liveEnabled ? '取消 live' : '设为 live'}
-                </button>
-              </div>
-              {msg[p.id] ? <div className="small muted" style={{ marginTop: 6 }}>{msg[p.id]}</div> : null}
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal pf-modal" onClick={(e) => e.stopPropagation()}>
+        <div className="pf-head">
+          <div>
+            <h3>执行配置</h3>
+            <div className="small muted">
+              每个配置 = 一个 harness 的一种用法(模型、推理、账号 home)。inspect 只握手; live 会真跑一次短回合。
             </div>
-          ))}
-        </div>
-        <div className="row" style={{ justifyContent: 'flex-end' }}>
-          <button className="btn" onClick={onChanged}>
+          </div>
+          <button className="btn ghost sm" onClick={onClose}>
             关闭
           </button>
+        </div>
+
+        <div className="pf-body">
+          <div className="pf-list">
+            {groups.map((g) => (
+              <div key={g.id} className="pf-group">
+                <div className="pf-group-head">
+                  <span className="mono">{g.label}</span>
+                  <button className="btn ghost sm" title={`新建 ${g.label} 配置`} onClick={() => startNew(g.id)}>
+                    +
+                  </button>
+                </div>
+                {g.items.length === 0 ? <div className="pf-empty">还没有配置</div> : null}
+                {g.items.map((p) => (
+                  <button
+                    key={p.id}
+                    className={`pf-item ${selected === p.id ? 'on' : ''} ${p.enabled ? '' : 'off'}`}
+                    onClick={() => pick(p)}
+                  >
+                    <span className="pf-item-name">{p.name}</span>
+                    <span className="pf-item-sub">
+                      {p.requestedModel || '默认模型'} · {p.liveEnabled ? 'live' : '未启用 live'} · 任务 {p.usage ?? 0}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            ))}
+            {groups.length === 0 ? <div className="pf-empty">还没有注册适配器</div> : null}
+          </div>
+
+          <div className="pf-detail">
+            {!draft ? (
+              <div className="empty-state">
+                从左侧选择一份配置, 或点分组标题旁的 <strong>+</strong> 新建。
+              </div>
+            ) : (
+              <>
+                <div className="pf-form">
+                  <div className="field">
+                    <label>名称</label>
+                    <input
+                      type="text"
+                      value={draft.name}
+                      onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+                      placeholder="例如: Claude · 主控 / Codex · 审查"
+                    />
+                  </div>
+                  <div className="field">
+                    <label>适配器{draft.id ? '(创建后不可改)' : ''}</label>
+                    <select
+                      value={draft.adapterId}
+                      disabled={!!draft.id}
+                      onChange={(e) => setDraft({ ...draft, adapterId: e.target.value })}
+                    >
+                      {(adapters.length > 0 ? adapters.map((a) => a.id) : [draft.adapterId]).map((id) => (
+                        <option key={id} value={id}>
+                          {adapters.find((a) => a.id === id)?.displayName ?? id}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="field pf-span">
+                    <label>可执行入口(项目内绝对路径; mock 可留空)</label>
+                    <input
+                      className="mono"
+                      type="text"
+                      value={draft.executableRef}
+                      onChange={(e) => setDraft({ ...draft, executableRef: e.target.value })}
+                      placeholder={execHint(draft.adapterId)}
+                    />
+                  </div>
+                  <div className="field pf-span">
+                    <label>凭据来源目录(首次使用时只复制到项目内私有 home, 不移动)</label>
+                    <input
+                      className="mono"
+                      type="text"
+                      value={draft.sourceHome}
+                      onChange={(e) => setDraft({ ...draft, sourceHome: e.target.value })}
+                      placeholder={homeHint(draft.adapterId)}
+                    />
+                  </div>
+                  <div className="field">
+                    <label>模型(留空 = harness 默认)</label>
+                    <input
+                      type="text"
+                      value={draft.requestedModel}
+                      onChange={(e) => setDraft({ ...draft, requestedModel: e.target.value })}
+                      placeholder="例如: gpt-6.1-sol"
+                    />
+                  </div>
+                  <div className="field">
+                    <label>推理强度(留空 = 默认)</label>
+                    <input
+                      type="text"
+                      value={draft.requestedReasoning}
+                      onChange={(e) => setDraft({ ...draft, requestedReasoning: e.target.value })}
+                      placeholder="low / medium / high"
+                    />
+                  </div>
+                  <div className="field">
+                    <label>并发组(同组内串行)</label>
+                    <input
+                      type="text"
+                      value={draft.concurrencyGroup}
+                      onChange={(e) => setDraft({ ...draft, concurrencyGroup: e.target.value })}
+                      placeholder="default"
+                    />
+                  </div>
+                  <div className="field">
+                    <label>状态</label>
+                    <div className="row">
+                      <label className={`chk ${draft.enabled ? 'on' : ''}`}>
+                        <input
+                          type="checkbox"
+                          checked={draft.enabled}
+                          onChange={(e) => setDraft({ ...draft, enabled: e.target.checked })}
+                        />
+                        <span>可被选入任务</span>
+                      </label>
+                      <label className={`chk ${draft.liveEnabled ? 'on' : ''}`}>
+                        <input
+                          type="checkbox"
+                          checked={draft.liveEnabled}
+                          onChange={(e) => setDraft({ ...draft, liveEnabled: e.target.checked })}
+                        />
+                        <span>允许真实调用</span>
+                      </label>
+                    </div>
+                  </div>
+                  <div className="field pf-span">
+                    <label>环境变量(KEY=VALUE, 每行一条)</label>
+                    <textarea
+                      className="mono"
+                      rows={3}
+                      value={draft.envText}
+                      onChange={(e) => setDraft({ ...draft, envText: e.target.value })}
+                      placeholder="HTTPS_PROXY=http://127.0.0.1:7897"
+                    />
+                  </div>
+                  <div className="field pf-span">
+                    <label>备注</label>
+                    <textarea rows={2} value={draft.notes} onChange={(e) => setDraft({ ...draft, notes: e.target.value })} />
+                  </div>
+                </div>
+
+                {notice ? <div className={`pf-notice ${notice.tone}`}>{notice.text}</div> : null}
+
+                <div className="pf-actions">
+                  <button className="btn primary" disabled={busy} onClick={() => void save()}>
+                    {draft.id ? '保存' : '创建'}
+                  </button>
+                  <button className="btn" disabled={busy || !draft.id} onClick={() => void probe('inspect')}>
+                    inspect 探针
+                  </button>
+                  <button className="btn" disabled={busy || !draft.id} onClick={() => void probe('live')}>
+                    live 探针
+                  </button>
+                  <button className="btn ghost" disabled={busy || !draft.id} onClick={() => void duplicate()}>
+                    复制一份
+                  </button>
+                  <button
+                    className="btn ghost"
+                    disabled={busy || !current}
+                    onClick={() => current && void toggleEnabled(current)}
+                  >
+                    {current?.enabled ? '停用' : '启用'}
+                  </button>
+                  <button className="btn danger" disabled={busy || !draft.id} onClick={() => void remove()}>
+                    删除
+                  </button>
+                </div>
+
+                {lastProbe ? (
+                  <div className="pf-probe">
+                    <span className={`chip ${lastProbe.ok ? 'green' : 'red'}`}>{lastProbe.mode} · {lastProbe.ok ? '通过' : '未通过'}</span>
+                    <span className="mono small muted">
+                      {lastProbe.version ?? '版本未知'} · {stamp(lastProbe.checkedAt)}
+                    </span>
+                    <div className="small muted">{lastProbe.detail}</div>
+                    {lastProbe.warnings?.length ? (
+                      <ul className="small muted pf-warn">
+                        {lastProbe.warnings.map((w, i) => (
+                          <li key={i}>{w}</li>
+                        ))}
+                      </ul>
+                    ) : null}
+                  </div>
+                ) : (
+                  <div className="small muted">还没有探针记录。真实调用前请先跑 inspect, 再跑 live。</div>
+                )}
+              </>
+            )}
+          </div>
         </div>
       </div>
     </div>
   );
+}
+
+interface Draft {
+  id: string | null;
+  name: string;
+  adapterId: string;
+  executableRef: string;
+  sourceHome: string;
+  requestedModel: string;
+  requestedReasoning: string;
+  concurrencyGroup: string;
+  envText: string;
+  notes: string;
+  liveEnabled: boolean;
+  enabled: boolean;
+}
+
+function toDraft(p: ProfileDto): Draft {
+  return {
+    id: p.id,
+    name: p.name,
+    adapterId: p.adapterId,
+    executableRef: p.executableRef,
+    sourceHome: p.configRefs?.sourceHome ?? '',
+    requestedModel: p.requestedModel ?? '',
+    requestedReasoning: p.requestedReasoning ?? '',
+    concurrencyGroup: p.concurrencyGroup,
+    envText: Object.entries(p.env ?? {})
+      .map(([k, v]) => `${k}=${v}`)
+      .join('\n'),
+    notes: p.notes ?? '',
+    liveEnabled: p.liveEnabled,
+    enabled: p.enabled,
+  };
+}
+
+function parseEnv(text: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const line of text.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const eq = trimmed.indexOf('=');
+    if (eq <= 0) continue;
+    out[trimmed.slice(0, eq).trim()] = trimmed.slice(eq + 1).trim();
+  }
+  return out;
+}
+
+function execHint(adapterId: string): string {
+  switch (adapterId) {
+    case 'codex':
+      return 'D:/1hobby/node_modules/@openai/codex/bin/codex.js';
+    case 'claude-code':
+      return 'D:/1hobby/node_modules/@anthropic-ai/claude-code/bin/claude.exe';
+    case 'dsh':
+      return 'D:/1hobby/node_modules/@deepseek-ai/dsh/lib/bin.js';
+    default:
+      return 'mock 适配器不需要可执行入口';
+  }
+}
+
+function homeHint(adapterId: string): string {
+  switch (adapterId) {
+    case 'codex':
+      return '%USERPROFILE%/.codex';
+    case 'claude-code':
+      return '%USERPROFILE%/.claude';
+    case 'dsh':
+      return '%USERPROFILE%/.dsh';
+    default:
+      return '不需要';
+  }
+}
+
+function errorText(e: unknown): string {
+  if (e instanceof Error) return e.message;
+  return String(e);
 }

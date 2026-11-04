@@ -175,7 +175,10 @@ export class ApiServer {
         return;
       }
       const ct = (req.headers['content-type'] ?? '').toLowerCase();
-      if (req.method === 'POST' || req.method === 'PATCH' || req.method === 'DELETE') {
+      // DELETE 通常没有请求体(浏览器不会为它自动加 Content-Type), 只在确实带体时才要求 JSON。
+      const hasBody = Number(req.headers['content-length'] ?? '0') > 0 || req.headers['transfer-encoding'] !== undefined;
+      const needsJson = req.method === 'POST' || req.method === 'PATCH' || (req.method === 'DELETE' && hasBody);
+      if (needsJson) {
         if (!ct.includes('application/json')) {
           this.json(res, 415, { code: 'unsupported_media_type', message: '写请求必须使用 application/json', correlationId });
           return;
@@ -369,7 +372,13 @@ export class ApiServer {
   }
 
   private listProfiles(): ProfileDto[] {
-    return this.repo.listProfiles().map((p) => ({ ...p, lastProbe: this.repo.getLastProbe(p.id) as ProfileDto['lastProbe'] }));
+    return this.repo
+      .listProfiles()
+      .map((p) => ({
+        ...p,
+        usage: this.repo.countParticipantsForProfile(p.id),
+        lastProbe: this.repo.getLastProbe(p.id) as ProfileDto['lastProbe'],
+      }));
   }
 
   private createProfile(ctx: Ctx): ProfileDto {
@@ -411,9 +420,27 @@ export class ApiServer {
   private deleteProfile(ctx: Ctx) {
     const profile = this.repo.getProfile(ctx.params.id);
     if (!profile) throw new EngineError('profile_not_found', '执行配置不存在', 404);
-    // 不物理删除, 只禁用: 历史任务的快照仍需可追溯
-    const updated = this.repo.updateProfile(profile.id, { enabled: false });
-    return { ok: true, profile: updated };
+    const hard = ctx.url.searchParams.get('hard') === '1';
+    if (!hard) {
+      // 默认只停用: 历史任务的快照仍需可追溯, 也避免误删正在用的配置。
+      const updated = this.repo.updateProfile(profile.id, { enabled: false });
+      return { ok: true, deleted: false, profile: updated };
+    }
+    const usage = this.repo.countParticipantsForProfile(profile.id);
+    if (usage > 0) {
+      throw new EngineError(
+        'profile_in_use',
+        `该执行配置被 ${usage} 个任务参与者引用过, 只能停用, 不能删除`,
+        409,
+        { usage },
+      );
+    }
+    const result = this.repo.deleteProfile(profile.id);
+    if (result !== 'deleted') {
+      throw new EngineError('profile_delete_failed', '执行配置未能删除', 409);
+    }
+    this.engine.emit('task.updated', { taskId: null, payload: { profileDeleted: profile.id } });
+    return { ok: true, deleted: true };
   }
 
   private async probeProfile(ctx: Ctx) {

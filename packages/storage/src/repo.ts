@@ -120,6 +120,24 @@ export class Repo {
   }
 
   /**
+   * 物理删除执行配置。只有从未被任务引用过才允许, 否则历史快照会失去可追溯的对照物。
+   * 返回 'deleted' | 'in_use' | 'not_found'。
+   */
+  deleteProfile(id: string): 'deleted' | 'in_use' | 'not_found' {
+    if (!this.getProfile(id)) return 'not_found';
+    const used = this.countParticipantsForProfile(id);
+    if (used > 0) return 'in_use';
+    this.db.run('DELETE FROM execution_profiles WHERE id = ?', id);
+    return 'deleted';
+  }
+
+  /** 有多少个任务参与者引用过该执行配置(用于判断能否物理删除)。 */
+  countParticipantsForProfile(profileId: string): number {
+    const row = this.db.get<{ n: number }>('SELECT COUNT(*) AS n FROM participants WHERE profile_id = ?', profileId);
+    return row?.n ?? 0;
+  }
+
+  /**
    * 最近一次 probe 结论。单独存储, 避免把运行时检查结果混进不可变配置快照。
    */
   setLastProbe(profileId: string, probe: unknown): void {

@@ -68,7 +68,7 @@
 
 ## 证据位置
 
-- 自动化测试: `npm test`(30 项) — `tests/core.test.ts`(14)、`tests/engine.mock.test.ts`(7)、`tests/http.test.ts`(4)、`tests/runtime.test.ts`(5)。
+- 自动化测试: `npm test`(31 项) — `tests/core.test.ts`(14)、`tests/engine.mock.test.ts`(7)、`tests/http.test.ts`(5)、`tests/runtime.test.ts`(5)。
 - 故障演练: `docs/evidence/p6-cancel-resume-2026-11-04.json`。
 - 真实 harness 探针: `docs/evidence/live-probe-2026-11-03.json`(Claude Code、DSH 真实回合)。
 - 界面截图: `.local/tmp/ui-1.png` … `ui-11.png`(空态、计划确认、完成态、产物预览、多模型图、对话折叠)。

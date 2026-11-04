@@ -92,10 +92,11 @@ export const api = {
   listProfiles: () => request<ProfileDto[]>('GET', '/api/profiles'),
   createProfile: (body: Record<string, unknown>) => request<ProfileDto>('POST', '/api/profiles', body),
   patchProfile: (id: string, body: Record<string, unknown>) => request<ProfileDto>('PATCH', `/api/profiles/${id}`, body),
-  deleteProfile: (id: string) => request<{ status: string }>('DELETE', `/api/profiles/${id}`),
+  deleteProfile: (id: string, hard = false) =>
+    request<{ ok: boolean; deleted: boolean }>('DELETE', `/api/profiles/${id}${hard ? '?hard=1' : ''}`),
   probeProfile: (id: string, mode: 'inspect' | 'live') =>
     request<ProbeResponse>('POST', `/api/profiles/${id}/probe`, { mode }),
-  capabilities: () => request<{ adapters: { id: string; displayName: string; mock: boolean }[] }>('GET', '/api/adapters'),
+  capabilities: () => request<{ id: string; displayName: string; mock: boolean }[]>('GET', '/api/adapters'),
   /** 页面存活心跳: 服务靠它判断网页还在不在。 */
   heartbeat: () => request<UiRuntimeStatus>('POST', '/api/runtime/heartbeat', {}),
   runtime: () => request<UiRuntimeStatus>('GET', '/api/runtime'),

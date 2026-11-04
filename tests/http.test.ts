@@ -328,6 +328,58 @@ test('SSE: 先发快照, 事件带 seq; 过旧游标要求重同步', async () =
   }
 });
 
+test('PROFILE: 可新增/删除执行配置; 被任务引用过的只能停用', async () => {
+  const { db, engine, api, base } = await boot();
+  try {
+    // 新增一份未被引用的配置 → 可物理删除
+    const created = await call(base, 'POST', '/api/profiles', {
+      name: '临时配置',
+      adapterId: 'mock',
+      executableRef: '',
+      requestedModel: 'mock-model',
+    });
+    assert.equal(created.status, 200);
+    const tempId = (created.json as { id: string }).id;
+    const list = await call(base, 'GET', '/api/profiles');
+    const temp = (list.json as { id: string; usage?: number }[]).find((p) => p.id === tempId);
+    assert.ok(temp, '新增的配置应出现在列表里');
+    assert.equal(temp.usage, 0);
+
+    // 浏览器发 DELETE 不会带 Content-Type, 这里必须放行
+    const removed = await rawRequest(base, {}, 'DELETE', `/api/profiles/${tempId}?hard=1`);
+    assert.equal(removed.status, 200);
+    assert.equal((removed.json as { deleted: boolean }).deleted, true);
+    const afterRemove = await call(base, 'GET', '/api/profiles');
+    assert.equal((afterRemove.json as { id: string }[]).some((p) => p.id === tempId), false);
+
+    // 被任务引用的配置: 物理删除 409, 默认删除退化为停用
+    const task = await call(base, 'POST', '/api/tasks', {
+      title: '引用配置的任务',
+      objective: '验证删除保护',
+      constraints: [],
+      strongProfileIds: ['prof_mock'],
+      leadProfileId: 'prof_mock',
+      workerProfileIds: [],
+      idempotencyKey: `profile-usage-${Date.now()}`,
+    });
+    assert.equal(task.status, 200);
+
+    const blocked = await call(base, 'DELETE', `/api/profiles/prof_mock?hard=1`);
+    assert.equal(blocked.status, 409);
+    assert.equal((blocked.json as { code: string }).code, 'profile_in_use');
+
+    const soft = await call(base, 'DELETE', '/api/profiles/prof_mock');
+    assert.equal(soft.status, 200);
+    assert.equal((soft.json as { deleted: boolean }).deleted, false);
+    const softProfile = (soft.json as { profile: { enabled: boolean } }).profile;
+    assert.equal(softProfile.enabled, false, '默认删除只停用, 保留历史可追溯');
+  } finally {
+    await engine.shutdown();
+    await api.stop();
+    db.close();
+  }
+});
+
 test.after(() => {
   rmSync(baseRoot, { recursive: true, force: true });
 });

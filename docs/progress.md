@@ -44,7 +44,7 @@
   心跳中断 12s 且无活跃会话时兜底; `beforeunload` 触发浏览器自带确认框, 侧栏常驻提示"关闭页面将停止后台服务"。
   关停走 `engine.shutdown()` + 新增的 `Engine.settleOnShutdown()`: 关会话/杀子进程/记 `interrupted`/审批置 `expired`/
   任务置 `paused`, 不自动重跑。`HH_EXIT_WITH_UI=0` 可恢复常驻模式。
-- 自动化测试 `tests/`: 30 项通过(`npm test`)。
+- 自动化测试 `tests/`: 31 项通过(`npm test`)。
   - `tests/core.test.ts` 14 项: 路径安全、计划校验(强制全部强模型审核/越界拒绝/未选参与者报错/依赖环/数量上限)、
     调度(依赖就绪、并发上限、每配置串行、写入范围冲突、死锁判定)。
   - `tests/engine.mock.test.ts` 7 项: 单强模型全链路、双强模型讨论+交叉复核、同配置回合不重叠、
@@ -73,7 +73,12 @@
   Claude Code 真实回合 3961ms 返回; DSH 真实回合 13443ms(`stopReason=end_turn`)。
   证据 `docs/evidence/live-probe-2026-11-03.json`, 说明见 `docs/compatibility.md` "live 探针语义"。
 - 文档: `README.md`(启动/脚本/环境变量/首次使用/支持版本/限制)、`docs/acceptance.md`(逐条验收矩阵)、
-  `docs/decisions.md`(ADR-001..009)、`docs/compatibility.md`、`THIRD-PARTY-NOTICES.md`。
+  `docs/decisions.md`(ADR-001..012)、`docs/compatibility.md`、`docs/adding-a-harness.md`、`THIRD-PARTY-NOTICES.md`。
+- 执行配置可在网页内增删(ADR-012, m03960): 「执行配置」重做为两栏面板 —— 左侧按 harness 分组并可 `+` 新建,
+  右侧表单编辑名称/可执行入口/凭据来源/模型/推理/并发组/环境变量/备注, 支持保存、复制一份、停用-启用、
+  inspect 与 live 探针、删除。删除分两种: 默认只停用(`enabled:false`); `?hard=1` 才真正删除, 且仅限
+  **从未被任务参与者引用**的配置(引用数 > 0 返回 409 `profile_in_use`)。`ProfileDto.usage` 暴露引用计数。
+  同时修掉服务端"无请求体的 DELETE 被 415 拒绝"的缺陷(只在确实带体时才要求 `application/json`)。
 
 ## 进行中
 
