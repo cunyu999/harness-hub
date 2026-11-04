@@ -432,6 +432,11 @@ button {
   min-width: 6px;
 }
 
+.workspace.with-inspector {
+  /* 打开节点详情时右侧只留一列(详情替代停靠栏), 画布保持可读宽度 */
+  grid-template-columns: minmax(0, 1fr) clamp(360px, 28vw, 460px);
+}
+
 .workspace {
   display: grid;
   grid-template-columns: minmax(0, 1fr) clamp(340px, 30vw, 440px);
@@ -1914,5 +1919,35 @@ a.link:hover {
 
   .cx-note {
     display: none;
+  }
+}
+
+/* ------------------------------ 节点详情列 ------------------------------ */
+.inspector {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  border-left: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.detail.inline {
+  position: static;
+  width: 100%;
+  max-height: none;
+  height: 100%;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  background: transparent;
+  overflow: auto;
+  z-index: auto;
+}
+
+@media (max-width: 1360px) {
+  .workspace.with-inspector {
+    grid-template-columns: minmax(0, 1fr) clamp(320px, 32vw, 400px);
   }
 }

@@ -95,16 +95,12 @@ export function NodeDetail({
   detail,
   selection,
   events,
-  anchor,
-  anchorBounds,
   onClose,
   onChanged,
 }: {
   detail: TaskDetail;
   selection: GraphSelection;
   events: EventEnvelope[];
-  anchor?: AnchorRect | null;
-  anchorBounds?: { left: number; right: number; top: number; bottom: number } | null;
   onClose: () => void;
   onChanged: () => void;
 }) {
@@ -117,11 +113,10 @@ export function NodeDetail({
   );
 
   if (!selection) return null;
-  const style = anchorStyle(anchor, anchorBounds);
 
   if (selection.kind === 'artifact') {
     return (
-      <div className="detail" style={style}>
+      <div className="detail inline">
         <h4>
           <span>交付物</span>
           <button className="btn ghost sm" onClick={onClose}>
@@ -158,7 +153,7 @@ export function NodeDetail({
 
   if (!participant) {
     return (
-      <div className="detail" style={style}>
+      <div className="detail inline">
         <h4>
           <span>节点</span>
           <button className="btn ghost sm" onClick={onClose}>
@@ -203,7 +198,7 @@ export function NodeDetail({
   };
 
   return (
-    <div className="detail" style={style}>
+    <div className="detail inline">
       <h4>
         <span>
           {participant.displayName}{' '}

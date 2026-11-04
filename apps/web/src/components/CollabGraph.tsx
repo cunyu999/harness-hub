@@ -457,9 +457,10 @@ function buildPlan(detail: TaskDetail, seats: Seat[], width: number): Plan {
   }
 
   const n = Math.max(1, raw.length);
-  const gutter = n >= 4 ? 48 : n > 2 ? 60 : 78;
+  const gutter = n >= 4 ? (width < 820 ? 38 : 48) : n > 2 ? 60 : 78;
   const available = width - PAD * 2 - gutter * (n - 1);
-  const colW = Math.max(168, Math.min(300, Math.floor(available / n)));
+  const minW = width < 820 ? 138 : 168;
+  const colW = Math.max(minW, Math.min(300, Math.floor(available / n)));
   const spanW = n * colW + (n - 1) * gutter;
   const planeW = Math.max(width, spanW + PAD * 2);
   const left = Math.round((planeW - spanW) / 2);

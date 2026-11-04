@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api, type ProfileDto } from './api';
 import { useTask, useTaskList } from './store';
 import { CollabGraph, type GraphSelection } from './components/CollabGraph';
-import { NodeDetail, type AnchorRect } from './components/NodeDetail';
+import { NodeDetail } from './components/NodeDetail';
 import { PlanPanel } from './components/PlanPanel';
 import { ApprovalPanel, ArtifactPanel, EventTimeline, ReviewPanel } from './components/Panels';
 import { Conversation } from './components/Conversation';
@@ -24,42 +24,6 @@ export function App() {
   });
   const [tab, setTab] = useState<Tab>('plan');
   const [selection, setSelection] = useState<GraphSelection>(null);
-  // 详情面板要贴在"被点的那张卡片"旁边, 所以跟着卡片的位置走(布局变化/滚动/缩放都会重算)
-  const [anchor, setAnchor] = useState<AnchorRect | null>(null);
-  const [anchorBounds, setAnchorBounds] = useState<{ left: number; right: number; top: number; bottom: number } | null>(
-    null,
-  );
-  useEffect(() => {
-    if (!selection || selection.kind !== 'participant') {
-      setAnchor(null);
-      return;
-    }
-    const measure = () => {
-      const el = document.querySelector(`[data-seat="${selection.id}"]`);
-      if (!el) return;
-      const r = el.getBoundingClientRect();
-      const canvas = document.querySelector('[data-canvas]');
-      if (canvas) {
-        const c = canvas.getBoundingClientRect();
-        const box = { left: c.left, right: c.right, top: c.top, bottom: c.bottom };
-        setAnchorBounds((prev) =>
-          prev && Math.abs(prev.left - box.left) < 1 && Math.abs(prev.right - box.right) < 1 ? prev : box,
-        );
-      }
-      setAnchor((prev) =>
-        prev && Math.abs(prev.top - r.top) < 1 && Math.abs(prev.left - r.left) < 1 && Math.abs(prev.width - r.width) < 1
-          ? prev
-          : { top: r.top, left: r.left, width: r.width, height: r.height },
-      );
-    };
-    measure();
-    const timer = window.setInterval(measure, 200);
-    window.addEventListener('resize', measure);
-    return () => {
-      window.clearInterval(timer);
-      window.removeEventListener('resize', measure);
-    };
-  }, [selection]);
   const [showNew, setShowNew] = useState(false);
   const [showProfiles, setShowProfiles] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -246,22 +210,11 @@ export function App() {
           ) : null}
         </header>
 
-        <div className="workspace">
+        <div className={`workspace ${detail && selection ? 'with-inspector' : ''}`}>
           <section className="canvas" data-canvas>
             {detail ? (
               <>
                 <CollabGraph detail={detail} events={state.events} selection={selection} onSelect={setSelection} />
-                {selection ? (
-                  <NodeDetail
-                    detail={detail}
-                    selection={selection}
-                    events={state.events}
-                    anchor={anchor}
-                    anchorBounds={anchorBounds}
-                    onClose={() => setSelection(null)}
-                    onChanged={refresh}
-                  />
-                ) : null}
               </>
             ) : (
               <div className="graph-empty" style={{ position: 'relative', flex: 1, display: 'grid', placeItems: 'center' }}>
@@ -278,6 +231,19 @@ export function App() {
             {state.error && !detail ? <div className="toast">{state.error}</div> : null}
           </section>
 
+          {detail && selection ? (
+            <aside className="inspector">
+              <NodeDetail
+                detail={detail}
+                selection={selection}
+                events={state.events}
+                onClose={() => setSelection(null)}
+                onChanged={refresh}
+              />
+            </aside>
+          ) : null}
+
+          {detail && selection ? null : (
           <aside className="dock">
             <div className="dock-tabs">
               {tabs.map((t) => (
@@ -305,6 +271,7 @@ export function App() {
               )}
             </div>
           </aside>
+          )}
         </div>
       </main>
 
