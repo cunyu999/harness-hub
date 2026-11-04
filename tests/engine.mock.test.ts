@@ -505,3 +505,73 @@ test('删除任务: 归档产物、清空对话与记录、保留工作区之外
     db.close();
   }
 });
+
+test('交付后提修改: 生成新计划版本并重新走 执行 → 审核 → 交付', async () => {
+  const { db, repo, engine } = makeEngine();
+  try {
+    const task = engine.createTask({
+      title: '会被要求返工的报告',
+      objective: '写一段说明',
+      constraints: [],
+      strongProfileIds: ['prof_a'],
+      leadProfileId: 'prof_a',
+      workerProfileIds: [],
+      outputHint: 'Markdown',
+    });
+    await engine.requestPlan(task.id, 'initial');
+    let planned = await waitFor(
+      () => Promise.resolve(repo.getTask(task.id)!),
+      (t) => t.lifecycle === 'awaiting_plan_approval',
+    );
+    let plan = repo.getPlan(planned.currentPlanRevisionId!)!;
+    await engine.decidePlan(task.id, {
+      decision: 'approve',
+      planRevisionId: plan.id,
+      planHash: plan.contentHash!,
+      participantsRevision: planned.participantsRevision,
+      expectedTaskVersion: planned.version,
+    });
+    await waitFor(
+      () => Promise.resolve(repo.getTask(task.id)!),
+      (t) => t.lifecycle === 'completed',
+      60_000,
+    );
+
+    const before = repo.listCurrentArtifacts(task.id);
+    assert.ok(before.length > 0);
+
+    // 用户对成果不满意, 要求修改
+    await engine.sendUserMessage(task.id, { text: '把结论再写清楚一点, 加一节风险说明', intent: 'supplement' });
+    planned = await waitFor(
+      () => Promise.resolve(repo.getTask(task.id)!),
+      (t) => t.lifecycle === 'awaiting_plan_approval',
+      30_000,
+    );
+    plan = repo.getPlan(planned.currentPlanRevisionId!)!;
+    assert.equal(plan.number, 2, '应当生成第 2 版计划');
+    assert.ok((plan.content.revisionNote ?? '').includes('风险说明'), '修订说明要记录用户的要求');
+
+    await engine.decidePlan(task.id, {
+      decision: 'approve',
+      planRevisionId: plan.id,
+      planHash: plan.contentHash!,
+      participantsRevision: planned.participantsRevision,
+      expectedTaskVersion: planned.version,
+    });
+    const done = await waitFor(
+      () => Promise.resolve(repo.getTask(task.id)!),
+      (t) => t.lifecycle === 'completed' || t.lifecycle === 'failed' || t.lifecycle === 'blocked',
+      60_000,
+    );
+    assert.equal(done.lifecycle, 'completed');
+    assert.equal(done.approvedPlanRevisionId, plan.id);
+    // 历史版本保留 approved 痕迹, 但当前生效的只有最后一版
+    const approved = repo.listPlans(task.id).filter((p) => p.status === 'approved');
+    assert.equal(approved.length, 2, '第 1 版与第 2 版都应有批准记录');
+    assert.equal(approved[approved.length - 1].id, plan.id);
+    assert.ok(repo.listEvents(task.id, 0, 2000).some((e) => e.type === 'task.control'));
+  } finally {
+    await engine.shutdown();
+    db.close();
+  }
+});

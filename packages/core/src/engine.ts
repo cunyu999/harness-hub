@@ -1034,6 +1034,33 @@ export class Engine implements AdapterHost {
     }
     if (note) extra = { ...extra, userNote: note };
 
+    // 修订场景: 让主控看到上一版计划和已产出的文件, 只改需要改的部分,
+    // 而不是从零重写一遍(否则会覆盖掉已经验收通过的东西)。
+    const previousPlans = this.repo.listPlans(taskId);
+    const approved = previousPlans.filter((p) => p.status === 'approved');
+    const lastApproved = approved.length > 0 ? approved[approved.length - 1] : null;
+    if (lastApproved) {
+      const currentArtifacts = this.repo.listCurrentArtifacts(taskId);
+      extra = {
+        ...extra,
+        previousPlan: {
+          number: lastApproved.number,
+          contentHash: lastApproved.contentHash,
+          summary: lastApproved.summary,
+          workItems: lastApproved.content.workItems.map((w) => ({ id: w.id, goal: w.goal, assigned: w.assignedParticipantId })),
+          deliverables: lastApproved.content.deliverables,
+        },
+        existingArtifacts: currentArtifacts.map((a) => ({
+          path: a.relativePath,
+          size: a.size,
+          sha256: a.sha256.slice(0, 12),
+        })),
+        revisionMode: true,
+        revisionInstructions:
+          '这是用户对已交付成果不满意后的修订轮: 只调整需要改的部分, 没被点名的已通过产物必须原样保留(不要重写、不要换路径); 新增/改动的文件写进 workItems; 计划里要说明这次改了什么。',
+      };
+    }
+
     const env = this.promptEnv(task, this.sandboxForTask(task.id));
     const kind = extra.discussionSummary ? 'plan.synthesize' : 'plan';
     let attemptNo = 0;
@@ -1645,7 +1672,12 @@ export class Engine implements AdapterHost {
   private async verifyWorkItem(task: TaskRecord, item: WorkItem): Promise<void> {
     this.repo.updateWorkItem(item.id, { state: 'verifying', updatedAt: nowIso() });
     const workspace = this.workspaceOf(task);
-    const artifacts = this.repo.listArtifacts(task.id).filter((a) => a.workItemId === item.id && a.status === 'registered');
+    // 产物按"本工作项声明的输出路径"归属: 返工时同内容文件会被去重成上一条记录,
+    // 用 workItemId 过滤会导致"文件明明在却没登记到产物"。
+    const specPaths = new Set(item.outputSpecs.map((spec) => normalizeRelPath(spec.relativePath)));
+    const artifacts = this.repo
+      .listArtifacts(task.id)
+      .filter((a) => a.status === 'registered' && specPaths.has(normalizeRelPath(a.relativePath)));
     const setHash = sha256Stable(artifacts.map((a) => `${a.relativePath}:${a.sha256}`).sort());
     let allPassed = true;
     const results: VerificationResult[] = [];
@@ -2130,6 +2162,27 @@ export class Engine implements AdapterHost {
       createdAt: nowIso(),
       incomplete: false,
     });
+    // 任务已经交付(或被阻塞/失败)后, 用户提出修改要求: 这是"再来一轮"，
+    // 不是闲聊 —— 重新出计划、重新批准、再走 执行 → 审核 → 交付。
+    if (
+      input.intent === 'supplement' &&
+      ['completed', 'blocked', 'failed'].includes(task.lifecycle) &&
+      !this.repo.hasOpenSessions(taskId)
+    ) {
+      this.touchTask(taskId, { lifecycle: 'active', phase: 'planning', errorCode: null, errorMessage: null });
+      this.emit('task.control', {
+        taskId,
+        payload: {
+          action: 'revision_requested',
+          from: task.lifecycle,
+          note: input.text.slice(0, 400),
+          planNumber: this.repo.listPlans(taskId).length,
+        },
+      });
+      void this.runStage(taskId, 'planning', () => this.planningStage(taskId, 'supplement', input.text));
+      return;
+    }
+
     if (task.lifecycle === 'awaiting_plan_approval') {
       const updated = this.touchTask(taskId, { lifecycle: 'active', phase: 'planning' });
       void this.runStage(taskId, 'planning', () => this.planningStage(taskId, 'supplement', input.text));

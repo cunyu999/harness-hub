@@ -104,6 +104,14 @@
   **从未被任务参与者引用**的配置(引用数 > 0 返回 409 `profile_in_use`)。`ProfileDto.usage` 暴露引用计数。
   同时修掉服务端"无请求体的 DELETE 被 415 拒绝"的缺陷(只在确实带体时才要求 `application/json`)。
 
+## 交付后的返工循环
+
+- `sendUserMessage` 在 `completed / blocked / failed` 且无活跃会话时, 收到 `intent='supplement'` 会把任务拉回 `planning`: 发 `task.control{action:'revision_requested'}`, 生成新计划版本(仍走批准门槛), 批准后重新执行/审核/交付。
+- `planningStage` 在存在已批准版本时附带 `previousPlan`、`existingArtifacts`(路径+大小+sha 前缀)、`revisionMode:true` 与 `revisionInstructions`, 提示词要求"只改被点名的部分, 其余产物原样保留"。
+- 修掉一个真实缺陷: `verifyWorkItem` 原来按 `workItemId` 找产物, 返工时同内容文件被 `insertArtifact` 去重成上一轮记录, 于是"文件明明在却报没有登记到产物"; 改为按本工作项声明的**输出路径**归属。
+- 前端: 对话页在终态显示提示条「我要改成果」(切到"补充 / 要求修改"并聚焦输入框), 输入框占位文案随状态变化。
+- 测试: 新增"交付后提修改: 生成新计划版本并重新走 执行 → 审核 → 交付", 现在 **43 项**。
+
 ## 任务清理(删除任务只留产物)
 
 - 新增 `DELETE /api/tasks/:id`(`?keepArtifacts=0` 可连产物一起丢): 先把当前登记的产物复制到 `.local/archive/<taskId>/` 并写 `manifest.json`, 再在一个事务里删掉任务与全部从属记录(事件表没有外键, 显式删), 最后删掉程序自己的临时工作区。任务仍有未结束会话时返回 409 task_busy。

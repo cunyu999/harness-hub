@@ -47,6 +47,7 @@ export function Conversation({
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const inputRef = useRef<HTMLTextAreaElement | null>(null);
 
   const messages = useMemo(() => detail.messages ?? [], [detail.messages]);
 
@@ -108,6 +109,23 @@ export function Conversation({
           </div>
         ))}
       </div>
+      {['completed', 'blocked', 'failed'].includes(detail.task.lifecycle) ? (
+        <div className="revise-hint">
+          <span>
+            任务已{detail.task.lifecycle === 'completed' ? '交付' : detail.task.lifecycle === 'blocked' ? '受阻' : '失败'}。
+            不满意可以提修改要求: 选「补充计划」→ 写清楚要改哪里 → 发送。
+          </span>
+          <button
+            className="btn"
+            onClick={() => {
+              setIntent('supplement');
+              inputRef.current?.focus();
+            }}
+          >
+            我要改成果
+          </button>
+        </div>
+      ) : null}
       <div className="composer">
         <div className="row" style={{ justifyContent: 'space-between' }}>
           <span className="small muted">统一主对话: 你的消息会交给主控会话处理, 不额外启动未声明的参与者。</span>
@@ -119,12 +137,17 @@ export function Conversation({
             <option value="chat">普通消息</option>
             <option value="instruction">指令</option>
             <option value="answer">回答追问</option>
-            <option value="supplement">补充计划</option>
+            <option value="supplement">补充 / 要求修改</option>
           </select>
         </div>
         <textarea
+          ref={inputRef}
           value={text}
-          placeholder="输入消息… (Ctrl+Enter 发送)"
+          placeholder={
+            intent === 'supplement' && ['completed', 'blocked', 'failed'].includes(detail.task.lifecycle)
+              ? '写清楚要改哪里(例如: 第二节太笼统, 换成带步骤的版本), 然后发送 → 会重新出计划让你批准'
+              : '输入消息… (Ctrl+Enter 发送)'
+          }
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) void send();

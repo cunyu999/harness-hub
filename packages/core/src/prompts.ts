@@ -115,6 +115,10 @@ export function buildPlanPrompt(
 - 依赖必须无环; 同一文件不要交给两个并行工作项同时写入。
 - 只能指派给 participants 中列出的 id。
 - reviewPolicy.strongParticipantIds 必须包含全部强模型席位。
+- 如果 context 里 revisionMode 为 true, 说明这是用户对**已交付成果**提出修改后的修订轮:
+  - 只改用户点名或确实不达标的部分; context.existingArtifacts 里没有被点名的文件必须原样保留(同路径、不重写)。
+  - 新计划要能独立执行, 但不要推翻已经通过的内容; 在 objectives/assumptions 里写清"这次改了什么、为什么"。
+  - 可以在 goal 里引用已有产物的路径作为输入。
 
 计划 JSON 结构:
 ${PLAN_SCHEMA}
