@@ -818,6 +818,29 @@ export class Repo {
       .map(mapArtifact);
   }
 
+  /**
+   * 同一个路径只保留最新一版为 registered。
+   * 场景: 执行者改了源码后重新编译, 同名产物会出现第二条修订; 不覆盖旧版就无法区分"当前产物"。
+   */
+  supersedeArtifactRevisions(taskId: string, relativePath: string, keepId: string): void {
+    this.db.run(
+      "UPDATE artifacts SET status='superseded' WHERE task_id = ? AND relative_path = ? AND id <> ? AND status='registered'",
+      taskId,
+      relativePath,
+      keepId,
+    );
+  }
+
+  /** 每个路径的最新一版(用于界面展示与"当前产物"语义), 历史修订仍保留在库里。 */
+  listCurrentArtifacts(taskId: string): ArtifactRevision[] {
+    const rows = this.db
+      .all<any>('SELECT * FROM artifacts WHERE task_id = ? ORDER BY registered_at ASC, rowid ASC', taskId)
+      .map(mapArtifact);
+    const latest = new Map<string, ArtifactRevision>();
+    for (const row of rows) latest.set(row.relativePath, row);
+    return [...latest.values()];
+  }
+
   getArtifact(id: string): ArtifactRevision | null {
     const row = this.db.get<any>('SELECT * FROM artifacts WHERE id = ?', id);
     return row ? mapArtifact(row) : null;

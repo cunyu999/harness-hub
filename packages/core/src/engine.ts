@@ -262,7 +262,7 @@ export class Engine implements AdapterHost {
       workItems: this.repo.listWorkItems(taskId),
       sessions: this.repo.listSessions(taskId),
       attempts: this.repo.listAttempts(taskId),
-      artifacts: this.repo.listArtifacts(taskId),
+      artifacts: this.repo.listCurrentArtifacts(taskId),
       verifications: this.repo.listVerifications(taskId),
       reviewRounds: this.repo.listReviewRounds(taskId),
       reviewResults: this.repo.listReviewResults(taskId),
@@ -1500,6 +1500,10 @@ export class Engine implements AdapterHost {
         note: null,
       };
       const saved = this.repo.insertArtifact(artifact);
+      // 同名产物只让最新一版留在 registered 状态, 否则"当前产物集合"会同时包含旧版本
+      if (saved.status === 'registered') {
+        this.repo.supersedeArtifactRevisions(task.id, saved.relativePath, saved.id);
+      }
       this.emit('artifact.registered', {
         taskId: task.id,
         payload: {

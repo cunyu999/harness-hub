@@ -478,7 +478,7 @@ export class ApiServer {
         strongCount: participants.filter((p) => p.role === 'strong').length,
         workerCount: participants.filter((p) => p.role === 'worker').length,
         planNumber: plan?.number ?? null,
-        artifactCount: this.repo.listArtifacts(t.id).length,
+        artifactCount: this.repo.listCurrentArtifacts(t.id).length,
       };
     });
   }
@@ -581,7 +581,7 @@ export class ApiServer {
   private listArtifacts(ctx: Ctx): ArtifactDto[] {
     const workspace = this.workspaceOf(ctx.params.id);
     return this.repo
-      .listArtifacts(ctx.params.id)
+      .listCurrentArtifacts(ctx.params.id)
       .map((a) => ({
         ...a,
         contentUrl: `/api/artifacts/${a.id}/content`,
@@ -596,7 +596,7 @@ export class ApiServer {
       rounds,
       results,
       verifications: this.repo.listVerifications(ctx.params.id),
-      artifacts: this.repo.listArtifacts(ctx.params.id),
+      artifacts: this.repo.listCurrentArtifacts(ctx.params.id),
       artifactSetHash: rounds.length > 0 ? rounds[rounds.length - 1].artifactSetHash : null,
     };
   }
