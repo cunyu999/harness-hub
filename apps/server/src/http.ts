@@ -109,6 +109,7 @@ export class ApiServer {
     this.add('GET', '/api/tasks', () => this.listTasks());
     this.add('POST', '/api/tasks', (ctx) => this.createTask(ctx));
     this.add('GET', '/api/tasks/:id', (ctx) => this.getTask(ctx));
+    this.add('DELETE', '/api/tasks/:id', (ctx) => this.purgeTask(ctx));
     this.add('GET', '/api/tasks/:id/events', (ctx) => this.streamEvents(ctx));
     this.add('POST', '/api/tasks/:id/plan', (ctx) => this.requestPlan(ctx));
     this.add('POST', '/api/tasks/:id/plan-decisions', (ctx) => this.decidePlan(ctx));
@@ -508,6 +509,16 @@ export class ApiServer {
     const out = { task, snapshot: this.engine.snapshot(task.id) };
     if (key) this.repo.putIdempotent('create-task', key, out);
     return out;
+  }
+
+  /**
+   * 删除任务: 默认把已登记产物归档到 .local/archive/<taskId>/, 再删掉任务记录与全部对话。
+   * ?keepArtifacts=0 表示连产物也不留(只删记录)。
+   */
+  private async purgeTask(ctx: Ctx) {
+    const keepArtifacts = ctx.url.searchParams.get('keepArtifacts') !== '0';
+    const result = await this.engine.purgeTask(ctx.params.id, { keepArtifacts });
+    return { ok: true, ...result };
   }
 
   private getTask(ctx: Ctx) {

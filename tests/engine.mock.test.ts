@@ -455,3 +455,53 @@ test('PLAN-06: 执行中范围变化 → 暂停并请求新计划版本', async 
     db.close();
   }
 });
+
+test('删除任务: 归档产物、清空对话与记录、保留工作区之外的目录', async () => {
+  const { db, repo, engine } = makeEngine();
+  try {
+    const task = engine.createTask({
+      title: '待删除的任务',
+      objective: '写一段 hello world 说明',
+      constraints: [],
+      strongProfileIds: ['prof_a'],
+      leadProfileId: 'prof_a',
+      workerProfileIds: [],
+      outputHint: 'Markdown',
+    });
+    await engine.requestPlan(task.id, 'initial');
+    const planned = await waitFor(
+      () => Promise.resolve(repo.getTask(task.id)!),
+      (t) => t.lifecycle === 'awaiting_plan_approval',
+    );
+    const plan = repo.getPlan(planned.currentPlanRevisionId!)!;
+    await engine.decidePlan(task.id, {
+      decision: 'approve',
+      planRevisionId: plan.id,
+      planHash: plan.contentHash!,
+      participantsRevision: planned.participantsRevision,
+      expectedTaskVersion: planned.version,
+    });
+    await waitFor(
+      () => Promise.resolve(repo.getTask(task.id)!),
+      (t) => t.lifecycle === 'completed' || t.lifecycle === 'failed' || t.lifecycle === 'blocked',
+      60_000,
+    );
+
+    const before = repo.listCurrentArtifacts(task.id);
+    assert.ok(before.length > 0, '完成的任务应该有登记产物');
+
+    const result = await engine.purgeTask(task.id);
+    assert.equal(result.files, before.length);
+    assert.ok(result.archivedDir);
+    assert.ok(readFileSync(join(result.archivedDir!, 'manifest.json'), 'utf8').includes('待删除的任务'));
+
+    // 记录全部清空
+    assert.equal(repo.getTask(task.id), null);
+    assert.equal(repo.listEvents(task.id, 0, 100).length, 0);
+    assert.equal(repo.listMessages(task.id).length, 0);
+    assert.equal(repo.listCurrentArtifacts(task.id).length, 0);
+  } finally {
+    await engine.shutdown();
+    db.close();
+  }
+});

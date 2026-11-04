@@ -30,6 +30,56 @@ export function App() {
   const [toast, setToast] = useState<string | null>(null);
 
   const { tasks, reload: reloadTasks } = useTaskList();
+
+  const terminalTasks = tasks.filter((t) => ['completed', 'cancelled', 'failed'].includes(t.lifecycle));
+
+  const removeFinished = async () => {
+    if (terminalTasks.length === 0) return;
+    const ok = window.confirm(
+      `删除 ${terminalTasks.length} 个已结束的任务?\n\n它们的事件、对话、计划与工作项都会删除, 已登记的成果产物会归档到 .local/archive/<taskId>/。\n\n此操作不可撤销。`,
+    );
+    if (!ok) return;
+    let files = 0;
+    for (const t of terminalTasks) {
+      try {
+        const res = await api.deleteTask(t.id);
+        files += res.files;
+        if (taskId === t.id) {
+          setTaskId(null);
+          setSelection(null);
+          localStorage.removeItem('hh.taskId');
+        }
+      } catch (e) {
+        window.alert(`删除「${t.title}」失败: ${e instanceof Error ? e.message : String(e)}`);
+        break;
+      }
+    }
+    await reloadTasks();
+    window.alert(`已清理 ${terminalTasks.length} 个任务, 归档产物 ${files} 个。`);
+  };
+
+  const removeTask = async (t: { id: string; title: string }) => {
+    const ok = window.confirm(
+      `删除任务「${t.title}」?\n\n会删除: 任务记录、计划、工作项、会话与全部对话、事件、审核与验证记录。\n会保留: 成果产物(归档到 .local/archive/${t.id}/, 附一份 manifest.json)。\n如果任务用的是你自己的目录, 里面的其它文件不会被改动。\n\n此操作不可撤销。`,
+    );
+    if (!ok) return;
+    try {
+      const res = await api.deleteTask(t.id);
+      if (taskId === t.id) {
+        setTaskId(null);
+        setSelection(null);
+        localStorage.removeItem('hh.taskId');
+      }
+      await reloadTasks();
+      window.alert(
+        res.files > 0
+          ? `已删除任务, 并归档 ${res.files} 个产物到:\n${res.archivedDir}`
+          : '已删除任务(没有登记过的产物需要归档)。',
+      );
+    } catch (e) {
+      window.alert(e instanceof Error ? e.message : String(e));
+    }
+  };
   const state = useTask(taskId);
   const { theme, toggle: toggleTheme } = useTheme();
   const { status: runtimeStatus } = usePageLifecycle();
@@ -122,27 +172,45 @@ export function App() {
 
         <div className="side-section">
           <span>任务</span>
-          <span>{tasks.length}</span>
+          <span className="row" style={{ gap: 8, alignItems: 'center' }}>
+            {terminalTasks.length > 0 ? (
+              <button className="linkish" onClick={() => void removeFinished()} title="删除所有已结束的任务(产物归档)">
+                清理已完成 {terminalTasks.length}
+              </button>
+            ) : null}
+            <span>{tasks.length}</span>
+          </span>
         </div>
         <div className="task-list">
           {tasks.length === 0 ? <div className="empty">还没有任务。<br />点击下方“新建任务”。</div> : null}
           {tasks.map((t) => (
-            <button
-              key={t.id}
-              className={`task-item ${t.id === taskId ? 'active' : ''}`}
-              onClick={() => {
-                setTaskId(t.id);
-                setSelection(null);
-                setTab('plan');
-              }}
-            >
-              <span className="task-item-title">{t.title}</span>
-              <span className="task-item-meta">
-                <span className={`chip ${LIFECYCLE_TONE[t.lifecycle]}`}>{LIFECYCLE_LABEL[t.lifecycle]}</span>
-                <span>{PHASE_LABEL[t.phase]}</span>
-                <span className="mono">{clock(t.updatedAt)}</span>
-              </span>
-            </button>
+            <div key={t.id} className={`task-row ${t.id === taskId ? 'active' : ''}`}>
+              <button
+                className="task-item"
+                onClick={() => {
+                  setTaskId(t.id);
+                  setSelection(null);
+                  setTab('plan');
+                }}
+              >
+                <span className="task-item-title">{t.title}</span>
+                <span className="task-item-meta">
+                  <span className={`chip ${LIFECYCLE_TONE[t.lifecycle]}`}>{LIFECYCLE_LABEL[t.lifecycle]}</span>
+                  <span>{PHASE_LABEL[t.phase]}</span>
+                  <span className="mono">{clock(t.updatedAt)}</span>
+                </span>
+              </button>
+              <button
+                className="task-del"
+                title="删除任务(保留产物)"
+                aria-label={`删除任务 ${t.title}`}
+                onClick={() => void removeTask(t)}
+              >
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M4 7h16M9 7V5h6v2M6 7l1 13h10l1-13" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+              </button>
+            </div>
           ))}
         </div>
 

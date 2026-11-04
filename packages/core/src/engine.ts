@@ -7,7 +7,7 @@
  */
 import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { mkdirSync, writeFileSync, readFileSync, existsSync, statSync } from 'node:fs';
+import { mkdirSync, writeFileSync, readFileSync, existsSync, statSync, copyFileSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import {
   DEFAULT_LIMITS,
@@ -159,6 +159,78 @@ export class Engine implements AdapterHost {
    * 停止后台流程: 停监控、等正在跑的 worker 收敛、标记 stopped。
    * 必须在关闭数据库前调用, 否则后台流程会撞上"database is not open"。
    */
+  /**
+   * 删除任务: 把成果产物归档到 .local/archive/<taskId>/, 再删掉任务记录与全部对话/会话/事件。
+   *
+   * 只归档"已登记的产物"; 用户自己指定的工作区(项目外目录)里的其它文件不碰也不删,
+   * 程序自己的临时工作区(.local/runs/<taskId>)会整个删掉。
+   */
+  async purgeTask(
+    taskId: string,
+    options: { keepArtifacts?: boolean } = {},
+  ): Promise<{ archivedDir: string | null; files: number; removedEvents: number }> {
+    const task = this.repo.getTask(taskId);
+    if (!task) throw new EngineError('task_not_found', `任务不存在: ${taskId}`, 404);
+    if (this.repo.hasOpenSessions(taskId)) {
+      throw new EngineError('task_busy', '这个任务还有未结束的会话, 请先取消任务再删除', 409);
+    }
+
+    const keep = options.keepArtifacts !== false;
+    const artifacts = this.repo.listCurrentArtifacts(taskId);
+    const workspace = this.workspaceOf(task);
+    let archivedDir: string | null = null;
+    let files = 0;
+
+    if (keep && artifacts.length > 0) {
+      archivedDir = path.join(this.cfg.paths.root, '.local', 'archive', taskId);
+      mkdirSync(archivedDir, { recursive: true });
+      const kept: Array<{ path: string; size: number; sha256: string }> = [];
+      for (const artifact of artifacts) {
+        let source: string;
+        try {
+          source = safeJoin(workspace, artifact.relativePath);
+        } catch {
+          continue;
+        }
+        if (!existsSync(source) || !statSync(source).isFile()) continue;
+        const target = path.join(archivedDir, artifact.relativePath);
+        mkdirSync(path.dirname(target), { recursive: true });
+        copyFileSync(source, target);
+        kept.push({ path: artifact.relativePath, size: artifact.size, sha256: artifact.sha256 });
+        files += 1;
+      }
+      const manifest = {
+        taskId,
+        title: task.title,
+        objective: task.objective,
+        constraints: task.constraints,
+        phase: task.phase,
+        lifecycle: task.lifecycle,
+        participants: this.repo.listParticipants(taskId).map((p) => ({ name: p.displayName, role: p.role })),
+        approvedPlanRevisionId: task.approvedPlanRevisionId ?? null,
+        archivedAt: new Date().toISOString(),
+        files: kept,
+        note: '任务记录与对话已按用户要求删除, 这里只保留成果产物。',
+      };
+      writeFileSync(path.join(archivedDir, 'manifest.json'), JSON.stringify(manifest, null, 2), 'utf8');
+    }
+
+    // 注意: 自定义工作区可能是用户自己的目录, 只在它是程序私有目录时才删
+    const privateWorkDir = this.workspaceDir(taskId);
+    if (path.resolve(workspace) === path.resolve(privateWorkDir)) {
+      try {
+        rmSync(privateWorkDir, { recursive: true, force: true, maxRetries: 4, retryDelay: 120 });
+        rmSync(this.taskTmpDir(taskId), { recursive: true, force: true, maxRetries: 4, retryDelay: 120 });
+      } catch {
+        /* 删不掉就留着, 不影响任务记录删除 */
+      }
+    }
+
+    const result = this.repo.purgeTask(taskId);
+    this.live.delete(taskId);
+    return { archivedDir, files, removedEvents: result.events };
+  }
+
   async shutdown(timeoutMs = 10_000): Promise<void> {
     this.stopped = true;
     this.stopMonitoring();

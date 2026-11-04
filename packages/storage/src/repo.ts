@@ -1095,6 +1095,32 @@ export class Repo {
     );
   }
 
+  /* ------------------------------ purge ------------------------------- */
+
+  /**
+   * 彻底删除一个任务: 任务记录 + 计划/工作项/会话/尝试/消息/审批/审核/验证/产物登记 + 事件。
+   * 其它表都通过 tasks 的 ON DELETE CASCADE 跟着走, events 没有外键所以显式删。
+   * 产物文件不在这里删 —— 调用方负责先归档到磁盘。
+   */
+  purgeTask(taskId: string): { events: number; artifacts: number } {
+    return this.db.tx(() => {
+      const artifacts = this.count('SELECT COUNT(*) AS n FROM artifacts WHERE task_id = ?', taskId);
+      const events = this.db.run('DELETE FROM events WHERE task_id = ?', taskId).changes;
+      this.db.run('DELETE FROM tasks WHERE id = ?', taskId);
+      return { events, artifacts };
+    });
+  }
+
+  /** 任务是否已收尾(没有未结束的会话), 供删除前检查。 */
+  hasOpenSessions(taskId: string): boolean {
+    return this.count('SELECT COUNT(*) AS n FROM managed_sessions WHERE task_id = ? AND closed_at IS NULL', taskId) > 0;
+  }
+
+  private count(sql: string, ...params: any[]): number {
+    const row = this.db.get<{ n: number }>(sql, ...params);
+    return row?.n ?? 0;
+  }
+
   /* ---------------------------- acceptance ---------------------------- */
 
   insertAcceptance(taskId: string, artifactSetHash: string, acceptedBy: string, limitations: string): void {

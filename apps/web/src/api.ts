@@ -67,6 +67,11 @@ export interface ProbeResponse {
 export const api = {
   health: () => request<HealthInfo>('GET', '/api/health'),
   listTasks: () => request<(TaskListItem & { artifactCount?: number })[]>('GET', '/api/tasks'),
+  deleteTask: (id: string, keepArtifacts = true) =>
+    request<{ ok: boolean; archivedDir: string | null; files: number; removedEvents: number }>(
+      'DELETE',
+      `/api/tasks/${id}?keepArtifacts=${keepArtifacts ? 1 : 0}`,
+    ),
   getTask: (id: string) => request<TaskDetail>('GET', `/api/tasks/${id}`),
   createTask: (input: Record<string, unknown>) => request<{ task: TaskRecord; snapshot: TaskSnapshot }>('POST', '/api/tasks', input),
   requestPlan: (id: string, reason: string, supplement?: string) =>
