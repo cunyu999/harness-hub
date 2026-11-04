@@ -2,7 +2,20 @@ import { useMemo, useState } from 'react';
 import type { TaskDetail } from '../api';
 import { api } from '../api';
 import type { GraphSelection } from './CollabGraph';
-import { ACTIVITY_LABEL, ITEM_LABEL, ITEM_TONE, PHASE_LABEL, ago, bytes, clock, duration, shortId } from '../lib/format';
+import {
+  ACTIVITY_LABEL,
+  ITEM_LABEL,
+  ITEM_TONE,
+  PHASE_LABEL,
+  VERDICT_LABEL,
+  VERDICT_TONE,
+  ago,
+  bytes,
+  clock,
+  duration,
+  shortId,
+  stamp,
+} from '../lib/format';
 import type { EventEnvelope } from '../../../../packages/contracts/src/events';
 
 export interface AnchorRect {
@@ -114,7 +127,213 @@ export function NodeDetail({
 
   if (!selection) return null;
 
-  if (selection.kind === 'artifact') {
+  if (selection.kind === 'plan') {
+    const plan = detail.plan;
+    if (!plan) {
+      return (
+        <div className="detail inline">
+          <h4>
+            <span>计划</span>
+            <button className="btn ghost sm" onClick={onClose}>
+              关闭
+            </button>
+          </h4>
+          <div className="muted small">还没有计划版本。</div>
+        </div>
+      );
+    }
+    const content = plan.content;
+    const approvals = detail.approvals.filter((a) => a.planRevisionId === plan.id);
+    const lead = detail.participants.find((p) => p.isLead) ?? null;
+    return (
+      <div className="detail inline">
+        <h4>
+          <span>计划 v{plan.number}</span>
+          <button className="btn ghost sm" onClick={onClose}>
+            关闭
+          </button>
+        </h4>
+
+        <div className="panel-title">版本</div>
+        <dl className="kv">
+          <dt>状态</dt>
+          <dd>
+            <span className={`chip ${plan.status === 'approved' ? 'ok' : plan.status === 'proposed' ? 'wait' : 'muted'}`}>{plan.status}</span>
+          </dd>
+          <dt>内容哈希</dt>
+          <dd className="mono small" title={plan.contentHash ?? ''}>
+            {(plan.contentHash ?? '').slice(0, 16)}…
+          </dd>
+          <dt>规划者</dt>
+          <dd>{detail.participants.find((p) => p.id === plan.createdBy)?.displayName ?? plan.createdBy ?? '—'}</dd>
+          <dt>生成时间</dt>
+          <dd title={stamp(plan.createdAt)}>{ago(plan.createdAt)}</dd>
+          <dt>历史版本</dt>
+          <dd>
+            {detail.planHistory.length} 个版本
+            {detail.planHistory.length > 1
+              ? `（${detail.planHistory
+                  .slice(0, -1)
+                  .map((p) => 'v' + p.number)
+                  .join(', ')} 已被取代）`
+              : ''}
+          </dd>
+          <dt>批准</dt>
+          <dd>
+            {approvals.length === 0
+              ? '尚未批准'
+              : approvals
+                  .map((a) => `${a.decision} · ${clock(a.createdAt)}${a.userNote ? ` · ${a.userNote}` : ''}`)
+                  .join('；')}
+          </dd>
+        </dl>
+
+        <div className="panel-title">目标</div>
+        <p className="small">{content.objective}</p>
+        {plan.summary ? <p className="small muted">{plan.summary}</p> : null}
+        {content.revisionNote ? (
+          <>
+            <div className="panel-title">这次改了什么</div>
+            <p className="small muted">{content.revisionNote}</p>
+          </>
+        ) : null}
+        {content.assumptions.length > 0 ? (
+          <>
+            <div className="panel-title">假设</div>
+            <ul className="small muted">
+              {content.assumptions.map((a, i) => (
+                <li key={i}>{a}</li>
+              ))}
+            </ul>
+          </>
+        ) : null}
+        {content.clarificationNeeded.length > 0 ? (
+          <>
+            <div className="panel-title">待你确认</div>
+            <ul className="small warn-text">
+              {content.clarificationNeeded.map((c, i) => (
+                <li key={i}>{c}</li>
+              ))}
+            </ul>
+          </>
+        ) : null}
+
+        <div className="panel-title">工作项 {content.workItems.length}</div>
+        {content.workItems.map((w) => {
+          const runtime = detail.workItems.find((x) => x.planItemId === w.id) ?? null;
+          const owner =
+            detail.participants.find((p) => p.id === w.assignedParticipantId)?.displayName ?? w.assignedParticipantId ?? '未指派';
+          return (
+            <div className="card" key={w.id}>
+              <div className="row" style={{ justifyContent: 'space-between', gap: 8 }}>
+                <span className="mono small">{w.id}</span>
+                <span className={`chip ${runtime ? ITEM_TONE[runtime.state] ?? 'muted' : 'muted'}`}>
+                  {runtime ? ITEM_LABEL[runtime.state] ?? runtime.state : '未创建'}
+                </span>
+              </div>
+              <div className="small" style={{ marginTop: 4 }}>
+                {w.goal}
+              </div>
+              <div className="small muted" style={{ marginTop: 4 }}>
+                执行者 {owner}
+                {w.dependencies.length ? ` · 依赖 ${w.dependencies.join(', ')}` : ''}
+                {w.riskLevel ? ` · 风险 ${w.riskLevel}` : ''}
+              </div>
+              {w.expectedOutputs.length ? (
+                <div className="small muted mono" style={{ marginTop: 4 }}>
+                  {w.expectedOutputs.map((o) => o.relativePath).join(' · ')}
+                </div>
+              ) : (
+                <div className="small muted" style={{ marginTop: 4 }}>
+                  无文件产物（只读复核类）
+                </div>
+              )}
+              {w.acceptanceCriteria.length ? (
+                <ul className="small muted" style={{ marginTop: 4, paddingLeft: 16 }}>
+                  {w.acceptanceCriteria.slice(0, 4).map((c, i) => (
+                    <li key={i}>{c}</li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
+          );
+        })}
+
+        <div className="panel-title">交付物</div>
+        {content.deliverables.length === 0 ? (
+          <div className="muted small">计划里没有单列交付物。</div>
+        ) : (
+          content.deliverables.map((d, i) => (
+            <div className="card" key={i}>
+              <div className="row" style={{ justifyContent: 'space-between' }}>
+                <span className="small">{d.label}</span>
+                <span className="chip muted">{d.format}</span>
+              </div>
+              <div className="small muted mono" style={{ marginTop: 3 }}>
+                {d.destination}
+              </div>
+            </div>
+          ))
+        )}
+
+        <div className="panel-title">审核策略</div>
+        <dl className="kv">
+          <dt>强模型席位</dt>
+          <dd>{content.reviewPolicy.strongParticipantIds.length} 个</dd>
+          <dt>交叉复核</dt>
+          <dd>{content.reviewPolicy.crossReviewRequired ? '需要' : '不需要（单强模型）'}</dd>
+          <dt>轮次上限</dt>
+          <dd>{detail.limits.maxRepairRounds} 轮修复</dd>
+          <dt>工作项上限</dt>
+          <dd>{detail.limits.maxWorkItems} 项</dd>
+          {lead ? (
+            <>
+              <dt>主控</dt>
+              <dd>{lead.displayName}</dd>
+            </>
+          ) : null}
+        </dl>
+
+        {content.verificationSteps.length ? (
+          <>
+            <div className="panel-title">验证步骤</div>
+            <ul className="small muted">
+              {content.verificationSteps.map((v, i) => (
+                <li key={i}>{v}</li>
+              ))}
+            </ul>
+          </>
+        ) : null}
+
+        {content.risks.length ? (
+          <>
+            <div className="panel-title">风险</div>
+            <ul className="small muted">
+              {content.risks.map((r, i) => (
+                <li key={i}>{r}</li>
+              ))}
+            </ul>
+          </>
+        ) : null}
+
+        {content.unresolvedDecisions.length ? (
+          <>
+            <div className="panel-title">未决问题</div>
+            <ul className="small muted">
+              {content.unresolvedDecisions.map((r, i) => (
+                <li key={i}>{r}</li>
+              ))}
+            </ul>
+          </>
+        ) : null}
+      </div>
+    );
+  }
+
+  if (selection.kind === 'delivery') {
+    const accepted = detail.workItems.filter((w) => w.state === 'accepted').length;
+    const passed = detail.verifications.filter((v) => v.status === 'passed').length;
+    const verdicts = detail.reviewResults;
     return (
       <div className="detail inline">
         <h4>
@@ -123,30 +342,81 @@ export function NodeDetail({
             关闭
           </button>
         </h4>
+
         <dl className="kv">
           <dt>已登记文件</dt>
           <dd>{detail.artifacts.length}</dd>
           <dt>工作项</dt>
           <dd>
-            {detail.workItems.filter((w) => w.state === 'accepted').length}/{detail.workItems.length} 已接受
+            {accepted}/{detail.workItems.length} 已接受
+          </dd>
+          <dt>验证</dt>
+          <dd>
+            {passed}/{detail.verifications.length} 通过
           </dd>
           <dt>审核轮次</dt>
-          <dd>{detail.reviewRounds.length}</dd>
-          <dt>交付目录</dt>
-          <dd className="mono small">{detail.workspace || '—'}</dd>
+          <dd>
+            {detail.reviewRounds.length} 轮
+            {verdicts.length ? `（${verdicts.map((v) => VERDICT_LABEL[v.verdict] ?? v.verdict).join(', ')}）` : ''}
+          </dd>
+          <dt>工作区</dt>
+          <dd className="mono small" title={detail.workspace || ''}>
+            {detail.workspace || '—'}
+          </dd>
         </dl>
-        <div className="panel-title">文件</div>
-        {detail.artifacts.map((a) => (
-          <div className="card" key={a.id}>
-            <div className="row" style={{ justifyContent: 'space-between' }}>
-              <span className="mono small">{a.relativePath}</span>
-              <span className="chip muted">{bytes(a.size)}</span>
+
+        <div className="panel-title">文件 {detail.artifacts.length}</div>
+        {detail.artifacts.length === 0 ? (
+          <div className="muted small">还没有登记产物。</div>
+        ) : (
+          detail.artifacts.map((a) => (
+            <div className="card" key={a.id}>
+              <div className="row" style={{ justifyContent: 'space-between' }}>
+                <span className="mono small">{a.relativePath}</span>
+                <span className="chip muted">{bytes(a.size)}</span>
+              </div>
+              <div className="small muted mono" style={{ marginTop: 3 }}>
+                {a.mediaType} · sha256 {a.sha256.slice(0, 12)} · {clock(a.registeredAt)}
+              </div>
             </div>
-            <div className="small muted mono" style={{ marginTop: 3 }}>
-              {a.mediaType} · sha256 {a.sha256.slice(0, 12)} · {clock(a.registeredAt)}
+          ))
+        )}
+
+        <div className="panel-title">验证记录</div>
+        {detail.verifications.length === 0 ? (
+          <div className="muted small">还没有验证记录。</div>
+        ) : (
+          detail.verifications.slice(-8).map((v) => (
+            <div className="card" key={v.id}>
+              <div className="row" style={{ justifyContent: 'space-between' }}>
+                <span className="mono small">{v.checkId}</span>
+                <span className={`chip ${v.status === 'passed' ? 'ok' : v.status === 'failed' ? 'bad' : 'muted'}`}>{v.status}</span>
+              </div>
+              <div className="small muted" style={{ marginTop: 3 }}>
+                {v.method} · {v.detail}
+              </div>
             </div>
-          </div>
-        ))}
+          ))
+        )}
+
+        <div className="panel-title">审核结论</div>
+        {verdicts.length === 0 ? (
+          <div className="muted small">还没有审核结果。</div>
+        ) : (
+          verdicts.map((r) => (
+            <div className="card" key={r.id}>
+              <div className="row" style={{ justifyContent: 'space-between' }}>
+                <span className="small">{detail.participants.find((p) => p.id === r.participantId)?.displayName ?? r.participantId}</span>
+                <span className={`chip ${VERDICT_TONE[r.verdict] ?? 'muted'}`}>{VERDICT_LABEL[r.verdict] ?? r.verdict}</span>
+              </div>
+              {r.summary ? (
+                <div className="small muted" style={{ marginTop: 3 }}>
+                  {r.summary}
+                </div>
+              ) : null}
+            </div>
+          ))
+        )}
       </div>
     );
   }

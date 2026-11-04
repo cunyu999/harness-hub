@@ -31,6 +31,16 @@ export function App() {
 
   const { tasks, reload: reloadTasks } = useTaskList();
 
+  /** 再次点击同一个节点/卡片就收起, 免得只能靠右上角关闭。 */
+  const pickSelection = (next: GraphSelection) => {
+    setSelection((prev) => {
+      if (!prev || !next) return next;
+      if (prev.kind !== next.kind) return next;
+      if (prev.kind === 'participant' && next.kind === 'participant') return prev.id === next.id ? null : next;
+      return null;
+    });
+  };
+
   const terminalTasks = tasks.filter((t) => ['completed', 'cancelled', 'failed'].includes(t.lifecycle));
 
   const removeFinished = async () => {
@@ -282,7 +292,7 @@ export function App() {
           <section className="canvas" data-canvas>
             {detail ? (
               <>
-                <CollabGraph detail={detail} events={state.events} selection={selection} onSelect={setSelection} />
+                <CollabGraph detail={detail} events={state.events} selection={selection} onSelect={pickSelection} />
               </>
             ) : (
               <div className="graph-empty" style={{ position: 'relative', flex: 1, display: 'grid', placeItems: 'center' }}>

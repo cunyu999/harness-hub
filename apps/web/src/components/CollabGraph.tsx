@@ -4,7 +4,11 @@ import type { EventEnvelope } from '../../../../packages/contracts/src/events';
 import type { ManagedSession, Participant, RunAttempt, TaskPhase, WorkItem } from '../../../../packages/contracts/src/types';
 import { ITEM_LABEL, PHASE_LABEL, duration, initials } from '../lib/format';
 
-export type GraphSelection = { kind: 'participant'; id: string } | { kind: 'artifact'; id: string } | null;
+export type GraphSelection =
+  | { kind: 'participant'; id: string }
+  | { kind: 'plan' }
+  | { kind: 'delivery' }
+  | null;
 
 type Tone = 'run' | 'wait' | 'ok' | 'bad' | 'idle';
 type ItemState = keyof typeof ITEM_LABEL;
@@ -148,6 +152,33 @@ export function CollabGraph({
                     selected={selection?.kind === 'participant' && selection.id === (c.seat as Seat).participant.id}
                     onSelect={() => onSelect({ kind: 'participant', id: (c.seat as Seat).participant.id })}
                   />
+                ) : c.select ? (
+                  <button
+                    key={c.key}
+                    type="button"
+                    className={`cx-card plain clickable ${c.tone ?? ''} ${selection?.kind === c.select ? 'selected' : ''}`}
+                    onClick={() => onSelect(c.select === 'plan' ? { kind: 'plan' } : { kind: 'delivery' })}
+                    aria-label={(c.title ?? '') + ' 详情'}
+                  >
+                    <span className="cx-card-rail" style={{ background: c.accent ?? 'var(--line-3)' }} />
+                    <span className="cx-card-top">
+                      <span className="cx-avatar" style={{ background: c.accentSoft ?? 'var(--surface-2)', color: c.accent ?? 'var(--text-2)' }}>
+                        {c.glyph}
+                      </span>
+                      <span className="cx-card-id">
+                        <b>{c.title}</b>
+                        <em title={c.sub}>{c.sub}</em>
+                      </span>
+                      {c.tone ? (
+                        <span className={`cx-state ${c.tone}`}>
+                          <span className={`cx-dot ${c.tone}`} />
+                          {c.tag}
+                        </span>
+                      ) : null}
+                    </span>
+                    {c.meta ? <span className="cx-card-meta">{c.meta}</span> : null}
+                    <span className="cx-card-more">查看详情 ›</span>
+                  </button>
                 ) : (
                   <div key={c.key} className={`cx-card plain ${c.tone ?? ''}`}>
                     <span className="cx-card-rail" style={{ background: c.accent ?? 'var(--line-3)' }} />
@@ -295,6 +326,8 @@ function shortAgo(iso: string, now: number): string {
 interface CardModel {
   key: string;
   seat: Seat | null;
+  /** 非席位卡(计划/交付)可被点开, 在右侧面板显示详情 */
+  select?: 'plan' | 'delivery';
   title?: string;
   sub?: string;
   meta?: string;
@@ -334,6 +367,7 @@ function buildStages(detail: TaskDetail, seats: Seat[]): Stage[] {
       cards.push({
         key: 'plan-card',
         seat: null,
+        select: 'plan',
         title: `计划 v${detail.plan.number}`,
         sub: `${detail.plan.content.workItems.length} 个工作项 · ${detail.plan.content.deliverables.length} 份交付物`,
         meta: `哈希 ${detail.plan.contentHash.slice(0, 10)} · ${planLive === 'wait' ? '待你确认' : planLive === 'ok' ? '已批准' : detail.plan.status}`,
@@ -373,6 +407,7 @@ function buildStages(detail: TaskDetail, seats: Seat[]): Stage[] {
       cards: [
         {
           key: 'deliver-card',
+          select: 'delivery',
           seat: null,
           title: '交付物',
           sub: `${detail.artifacts.length} 个登记文件 · ${detail.reviewRounds.length} 轮审核`,

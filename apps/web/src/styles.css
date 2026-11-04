@@ -1923,6 +1923,38 @@ a.link:hover {
   gap: 6px;
 }
 
+.cx-card.plain.clickable {
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  width: 100%;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+.cx-card.plain.clickable:hover {
+  border-color: var(--line-3);
+  transform: translateY(-1px);
+}
+
+.cx-card.plain.clickable.selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.cx-card-more {
+  margin-top: 2px;
+  font-size: 10.5px;
+  color: var(--text-3);
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.cx-card.plain.clickable:hover .cx-card-more,
+.cx-card.plain.clickable.selected .cx-card-more {
+  opacity: 1;
+}
+
 @keyframes cx-dash {
   to {
     stroke-dashoffset: -20;
