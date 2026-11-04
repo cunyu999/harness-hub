@@ -23,6 +23,20 @@ import {
 import { newId } from '../../core/src/util.js';
 import { resolveClaudeBinary } from './exec.js';
 
+/**
+ * 权限模式 → Claude Code 的 permissionMode。
+ * read-only 用 plan(只读规划, 不落盘), danger-full-access 用 bypassPermissions,
+ * workspace-write 用 default(由 canUseTool 决定放行或询问)。
+ */
+function claudePermission(mode: ExecutionProfile['sandbox']): 'plan' | 'default' | 'bypassPermissions' {
+  if (mode === 'read-only') return 'plan';
+  if (mode === 'danger-full-access') return 'bypassPermissions';
+  return 'default';
+}
+
+/** 会改动磁盘的工具名。只读模式下这些一律拒绝。 */
+const WRITE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Bash', 'bash']);
+
 export interface ClaudeAdapterOptions {
   /** 可选兜底可执行文件; 不填时优先执行配置/PATH, 都没有就用 SDK 自带的可执行文件 */
   executable?: string;
@@ -213,7 +227,7 @@ export class ClaudeAdapter implements HarnessAdapter {
           ...(this.executableFor(profile) ? { pathToClaudeCodeExecutable: this.executableFor(profile) as string } : {}),
           env: this.sessionEnv(profile, {}),
           abortController: controller,
-          permissionMode: 'default',
+          permissionMode: claudePermission(profile.sandbox),
           includePartialMessages: false,
           settingSources: ['user', 'project'],
           maxTurns: 4,
@@ -362,7 +376,7 @@ class ClaudeSession implements AdapterSession {
         env: this.deps.env,
         abortController: controller,
         includePartialMessages: true,
-        permissionMode: 'default',
+        permissionMode: claudePermission(this.opts.profile.sandbox),
         settingSources: ['user', 'project'],
         stderr: (data: string) => {
           if (/error/i.test(data) && data.trim().length > 0) {
@@ -370,6 +384,11 @@ class ClaudeSession implements AdapterSession {
           }
         },
         canUseTool: async (toolName: string, input: Record<string, unknown>, extra: Record<string, unknown>) => {
+          const mode = this.opts.profile.sandbox;
+          // 只读配置: 写类工具直接拒, 不浪费一次人工审批
+          if (mode === 'read-only' && WRITE_TOOLS.has(toolName)) {
+            return { behavior: 'deny', message: '当前执行配置是只读权限, 不允许修改文件或执行命令' };
+          }
           const requestId = newId('apr');
           this.activity = 'idle';
           this.info();

@@ -182,6 +182,39 @@ export class Engine implements AdapterHost {
   /* 路径                                                                */
   /* ------------------------------------------------------------------ */
 
+  /**
+   * 准备任务工作区: 用户指定目录必须已存在(或在项目内允许创建), 绝不静默在项目外建目录。
+   * 返回实际使用的绝对路径。
+   */
+  private prepareWorkspace(custom: string | null, taskId: string): string {
+    const fallback = this.workspaceDir(taskId);
+    if (!custom) {
+      mkdirSync(fallback, { recursive: true });
+      return fallback;
+    }
+    const abs = path.resolve(custom);
+    if (existsSync(abs)) {
+      const stat = statSync(abs);
+      if (!stat.isDirectory()) throw new EngineError('workspace_not_directory', `工作区不是目录: ${abs}`, 422);
+      return abs;
+    }
+    if (!isInside(this.cfg.paths.root, abs)) {
+      throw new EngineError(
+        'workspace_missing',
+        `工作区不存在: ${abs}。请在磁盘上先创建该目录, 程序不会在项目外自动创建目录。`,
+        422,
+      );
+    }
+    mkdirSync(abs, { recursive: true });
+    return abs;
+  }
+
+  /** 任务实际使用的工作区: 用户指定优先, 否则用任务私有目录。 */
+  workspaceOf(task: { id: string; workspaceRoot?: string | null }): string {
+    const custom = task.workspaceRoot?.trim();
+    return custom ? path.resolve(custom) : this.workspaceDir(task.id);
+  }
+
   workspaceDir(taskId: string): string {
     return path.join(this.cfg.paths.root, '.local', 'runs', taskId, 'workspace');
   }
@@ -292,6 +325,8 @@ export class Engine implements AdapterHost {
     workerProfileIds: string[];
     limits?: Partial<TaskLimits>;
     outputHint?: string;
+    /** 用户指定的工作区(绝对或相对项目根); 留空用任务私有目录。 */
+    workspace?: string | null;
   }): TaskRecord {
     const strongIds = unique(input.strongProfileIds);
     if (strongIds.length === 0) throw new EngineError('invalid_participants', '至少需要一个强模型配置');
@@ -320,6 +355,7 @@ export class Engine implements AdapterHost {
       participantsRevision: 1,
       version: 1,
       limits,
+      workspaceRoot: resolveTaskWorkspace(input.workspace ?? null),
       errorCode: null,
       errorMessage: null,
       createdAt: now,
@@ -365,8 +401,8 @@ export class Engine implements AdapterHost {
       }
     });
 
-    mkdirSync(this.workspaceDir(taskId), { recursive: true });
-    mkdirSync(path.join(this.workspaceDir(taskId), 'deliverables'), { recursive: true });
+    const workspace = this.prepareWorkspace(task.workspaceRoot, taskId);
+    mkdirSync(path.join(workspace, 'deliverables'), { recursive: true });
     this.emit('task.updated', { taskId, payload: { created: true, phase: task.phase, lifecycle: task.lifecycle } });
     return this.repo.getTask(taskId)!;
   }
@@ -411,12 +447,25 @@ export class Engine implements AdapterHost {
     return adapter;
   }
 
-  private promptEnv(task: TaskRecord): PromptEnv {
+  /** 任务级提示里用主控的权限模式(参与者级在打开会话时单独传)。 */
+  private sandboxForTask(taskId: string): 'read-only' | 'workspace-write' | 'danger-full-access' {
+    const lead = this.leadOf(taskId);
+    return lead ? this.sandboxOf(lead) : 'workspace-write';
+  }
+
+  /** 参与者的会话权限来自它当初的执行配置(有快照用快照, 否则回退当前配置)。 */
+  private sandboxOf(participant: Participant): 'read-only' | 'workspace-write' | 'danger-full-access' {
+    const profile = this.repo.getProfile(participant.profileId);
+    return profile?.sandbox ?? 'workspace-write';
+  }
+
+  private promptEnv(task: TaskRecord, sandbox: 'read-only' | 'workspace-write' | 'danger-full-access' = 'workspace-write'): PromptEnv {
     return {
       task,
       participants: this.participantsOf(task.id),
       limits: task.limits,
-      workspaceRoot: this.workspaceDir(task.id),
+      workspaceRoot: this.workspaceOf(task),
+      sandbox,
       outputDir: 'deliverables',
     };
   }
@@ -436,7 +485,7 @@ export class Engine implements AdapterHost {
     if (this.stopped) throw new EngineError('engine_stopped', '引擎已关闭, 不再启动新回合', 503);
     const profile = this.profileFor(participant);
     const adapter = this.adapterFor(profile);
-    const workspace = this.workspaceDir(task.id);
+    const workspace = this.workspaceOf(task);
     mkdirSync(workspace, { recursive: true });
     const attemptId = newId('att');
     const sessionRowId = newId('ses');
@@ -505,6 +554,7 @@ export class Engine implements AdapterHost {
           purpose: opts.purpose ?? kind,
           env: { ...profile.env, ...this.taskSessionEnv(task.id, { HH_PARTICIPANT: participant.id }) },
           writeScope: [workspace],
+          sandbox: profile.sandbox,
           resumeNativeSessionId: this.reusableNativeSession(task.id, participant.id, phase),
         },
         this,
@@ -912,7 +962,7 @@ export class Engine implements AdapterHost {
     }
     if (note) extra = { ...extra, userNote: note };
 
-    const env = this.promptEnv(task);
+    const env = this.promptEnv(task, this.sandboxForTask(task.id));
     const kind = extra.discussionSummary ? 'plan.synthesize' : 'plan';
     let attemptNo = 0;
     let lastErrors: string[] = [];
@@ -939,7 +989,7 @@ export class Engine implements AdapterHost {
         task,
         participants,
         limits: task.limits,
-        workspaceRoot: this.workspaceDir(taskId),
+        workspaceRoot: this.workspaceOf(this.repo.getTask(taskId) ?? { id: taskId, workspaceRoot: null }),
         outputDir: 'deliverables',
       });
       if (!result.ok || !result.plan) {
@@ -967,7 +1017,7 @@ export class Engine implements AdapterHost {
     strong: Participant[],
     lead: Participant,
   ): Promise<Record<string, unknown>> {
-    const env = this.promptEnv(task);
+    const env = this.promptEnv(task, this.sandboxForTask(task.id));
     const proposals: { participantId: string; name: string; text: string }[] = [];
     const results = await Promise.all(
       strong.map(async (p) => {
@@ -1328,7 +1378,7 @@ export class Engine implements AdapterHost {
 
     let participant = item.assignedParticipantId ? this.repo.getParticipant(item.assignedParticipantId) : null;
     if (!participant || participant.taskId !== taskId) participant = this.leadOf(taskId);
-    const env = this.promptEnv(task);
+    const env = this.promptEnv(task, this.sandboxForTask(task.id));
     const planItem = {
       id: item.planItemId,
       goal: item.goal,
@@ -1469,7 +1519,7 @@ export class Engine implements AdapterHost {
     producer: string,
     relativePaths: string[],
   ): ArtifactRevision[] {
-    const workspace = this.workspaceDir(task.id);
+    const workspace = this.workspaceOf(task);
     const out: ArtifactRevision[] = [];
     for (const rawRel of relativePaths) {
       if (!rawRel || rawRel.trim().length === 0) continue;
@@ -1522,7 +1572,7 @@ export class Engine implements AdapterHost {
 
   private async verifyWorkItem(task: TaskRecord, item: WorkItem): Promise<void> {
     this.repo.updateWorkItem(item.id, { state: 'verifying', updatedAt: nowIso() });
-    const workspace = this.workspaceDir(task.id);
+    const workspace = this.workspaceOf(task);
     const artifacts = this.repo.listArtifacts(task.id).filter((a) => a.workItemId === item.id && a.status === 'registered');
     const setHash = sha256Stable(artifacts.map((a) => `${a.relativePath}:${a.sha256}`).sort());
     let allPassed = true;
@@ -1705,7 +1755,7 @@ export class Engine implements AdapterHost {
       createdAt: nowIso(),
       completedAt: null,
     });
-    const env = this.promptEnv(task);
+    const env = this.promptEnv(task, this.sandboxForTask(task.id));
     const results: ReviewResult[] = [];
 
     const first = await Promise.all(
@@ -1899,7 +1949,7 @@ export class Engine implements AdapterHost {
     const plan = task.approvedPlanRevisionId ? this.repo.getPlan(task.approvedPlanRevisionId) : null;
     const artifacts = this.repo.listArtifacts(taskId).filter((a) => a.status === 'registered');
     const lead = this.leadOf(taskId);
-    const env = this.promptEnv(task);
+    const env = this.promptEnv(task, this.sandboxForTask(task.id));
     if (plan) {
       const outcomes = this.repo
         .listWorkItems(taskId)
@@ -1917,7 +1967,7 @@ export class Engine implements AdapterHost {
       }
     }
     // 重新登记可能的集成产物
-    const extraPaths = artifacts.map((a) => a.relativePath).filter((p) => existsSync(safeJoin(this.workspaceDir(taskId), p)));
+    const extraPaths = artifacts.map((a) => a.relativePath).filter((p) => existsSync(safeJoin(this.workspaceOf(this.repo.getTask(taskId) ?? { id: taskId, workspaceRoot: null }), p)));
     this.registerArtifacts(task, null, null, 'integration', extraPaths);
     await this.deliveryStage(taskId);
   }
@@ -1949,7 +1999,7 @@ export class Engine implements AdapterHost {
     for (const r of this.repo.listReviewResults(taskId)) {
       lines.push(`- ${this.participantName(r.participantId)}: ${r.verdict} — ${r.summary.slice(0, 200)}`);
     }
-    const workspace = this.workspaceDir(taskId);
+    const workspace = this.workspaceOf(this.repo.getTask(taskId) ?? { id: taskId, workspaceRoot: null });
     const deliveryPath = path.join(workspace, 'deliverables', 'DELIVERY.md');
     mkdirSync(path.dirname(deliveryPath), { recursive: true });
     writeFileSync(deliveryPath, lines.join('\n'), 'utf8');
@@ -1958,7 +2008,7 @@ export class Engine implements AdapterHost {
     if (plan) {
       const reviews = this.repo.listReviewResults(taskId).map((r) => ({ verdict: r.verdict, summary: r.summary }));
       const prompt = buildDeliveryPrompt(
-        this.promptEnv(task),
+        this.promptEnv(task, this.sandboxForTask(task.id)),
         plan.content,
         artifacts,
         reviews,
@@ -2035,7 +2085,7 @@ export class Engine implements AdapterHost {
     const liveTask = this.requireTask(taskId);
     if (['completed', 'cancelled', 'cancelling'].includes(liveTask.lifecycle)) return;
     const lead = this.leadOf(taskId);
-    const env = this.promptEnv(liveTask);
+    const env = this.promptEnv(liveTask, this.sandboxOf(lead));
     const prompt = {
       text: `### HARNESS-HUB TURN v1\nkind: chat\ntask: ${taskId}\nwork_item: -\nexpects_json: false\n\n### CONTEXT (JSON)\n${JSON.stringify(
         { task: { id: task.id, title: task.title, objective: task.objective }, workspace: env.workspaceRoot, userMessage: input.text },
@@ -2386,6 +2436,13 @@ export class Engine implements AdapterHost {
 
 function sha256FileSync(absPath: string): string {
   return createHash('sha256').update(readFileSync(absPath)).digest('hex');
+}
+
+/** 把用户输入的工作区规范成绝对路径; 空值返回 null(用任务私有目录)。 */
+function resolveTaskWorkspace(input: string | null): string | null {
+  const text = input?.trim();
+  if (!text) return null;
+  return path.isAbsolute(text) ? path.normalize(text) : path.resolve(text);
 }
 
 function isProcessAlive(pid: number): boolean {  try {

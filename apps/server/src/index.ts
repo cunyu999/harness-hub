@@ -80,6 +80,7 @@ function seedProfiles(repo: Repo, cfg: AppConfig): void {
       liveEnabled: false,
       env: {},
       workspaceRoot: null,
+      sandbox: 'workspace-write' as const,
       capabilitySnapshot: null,
       notes: s.notes,
       createdAt: now,

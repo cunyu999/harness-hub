@@ -71,6 +71,21 @@ npm run dev:web                              # 前端 4311, 代理 /api 到 4310
 6. 执行期间左侧协作图实时反映真实会话事件(连接、工具调用、审批、重试、无事件、取消、失败);
    右侧页签可看计划、对话、审批、审核、产物与事件时间线。
 
+### 工作区与权限
+
+- **任务级**: 新建任务时可以填「工作目录」。留空则每个任务用 `.local/runs/<taskId>/workspace` 作为工作区, 所有参与者(主控/讨论者/执行者/审核者)共用它。
+- **配置级**: 执行配置里的「工作目录」优先于任务级——同一个 harness 可以固定指向某个真实项目目录, 于是你平时用 IDE 打开的那个目录就是它工作的地方, 产物也落在那里。
+- **不静默造目录**: 填了不存在的路径且该路径在项目外时, 建任务会返回 `422 workspace_missing`, 让你先手动创建; 只有项目内的路径会自动 `mkdir -p`。
+- **会话权限** 三档, 按 harness 原生能力生效:
+
+  | 档位 | Codex | Claude Code | DeepSeek Harness |
+  | --- | --- | --- | --- |
+  | 只读 `read-only` | `sandbox: read-only` + 审批 `never` | `permissionMode: plan` + 写类工具直接拒绝 | 只能靠提示词(无沙箱), 越界靠事后审计 |
+  | 工作区内可写 `workspace-write`(默认) | `sandbox: workspace-write` + 审批 `on-request` | `permissionMode: default`, 逐次审批 | 同上 |
+  | 完全权限 `danger-full-access` | `sandbox: danger-full-access` + 审批 `never` | `permissionMode: bypassPermissions` | 同上 |
+
+  作用范围是**该 harness 发起的会话**, 不改它的配置文件; DSH 的 ACP 协议没有沙箱参数, 所以它在界面上如实标注为"只能靠提示词与事后审计", 不假装有隔离。
+
 ### 执行配置可以随时增删(无需改代码)
 
 「执行配置」是一个列表 + 表单的管理面板:

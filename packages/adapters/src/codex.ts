@@ -22,6 +22,16 @@ import {
 import { newId, sha256Text } from '../../core/src/util.js';
 import { resolveLauncher } from './exec.js';
 
+/**
+ * 权限模式 → Codex 的审批策略。
+ * 只读/完全权限下不再逐步询问(询问也没有意义: 只读会被拒, 完全权限本就允许),
+ * workspace-write 保持 on-request, 让越界写入变成一次人工决策。
+ */
+function sandboxApproval(mode: ExecutionProfile['sandbox']): 'on-request' | 'never' {
+  if (mode === 'workspace-write') return 'on-request';
+  return 'never';
+}
+
 export interface CodexAdapterOptions {
   /** 可选兜底入口; 不填则只用执行配置里填的路径或 PATH 里的 codex */
   entry?: string;
@@ -570,8 +580,8 @@ class CodexSession implements AdapterSession {
     const profile = this.opts.profile;
     const params: Record<string, unknown> = {
       cwd: this.opts.cwd,
-      approvalPolicy: profile.configRefs.approvalPolicy ?? 'on-request',
-      sandbox: profile.configRefs.sandbox ?? 'workspace-write',
+      approvalPolicy: profile.configRefs.approvalPolicy ?? sandboxApproval(profile.sandbox),
+      sandbox: profile.configRefs.sandbox ?? profile.sandbox ?? 'workspace-write',
       cwdCompat: undefined,
     };
     delete params.cwdCompat;

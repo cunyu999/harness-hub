@@ -24,6 +24,7 @@ function task(over: Partial<TaskRecord> = {}): TaskRecord {
     participantsRevision: 1,
     version: 1,
     limits: DEFAULT_LIMITS,
+    workspaceRoot: null,
     errorCode: null,
     errorMessage: null,
     createdAt: new Date().toISOString(),

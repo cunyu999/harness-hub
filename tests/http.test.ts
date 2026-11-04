@@ -38,6 +38,7 @@ async function boot() {
     capabilitySnapshot: null,
     env: {},
     workspaceRoot: null,
+    sandbox: 'workspace-write',
     liveEnabled: true,
     notes: null,
     createdAt: now,

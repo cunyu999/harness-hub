@@ -33,6 +33,7 @@ function profile(id: string, name: string): ExecutionProfile {
     capabilitySnapshot: null,
     env: {},
     workspaceRoot: null,
+    sandbox: 'workspace-write' as const,
     liveEnabled: true,
     notes: null,
     createdAt: now,

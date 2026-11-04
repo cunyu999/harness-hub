@@ -104,6 +104,13 @@
   **从未被任务参与者引用**的配置(引用数 > 0 返回 409 `profile_in_use`)。`ProfileDto.usage` 暴露引用计数。
   同时修掉服务端"无请求体的 DELETE 被 415 拒绝"的缺陷(只在确实带体时才要求 `application/json`)。
 
+## 工作区与权限
+
+- 任务可指定工作目录(`tasks.workspace_root`), 留空用 `.local/runs/<taskId>/workspace`; 执行配置可按 harness 再覆盖(`execution_profiles.workspace_root`), 于是同一个 harness 可以固定指向真实项目目录。
+- 执行配置新增 `sandbox`: `read-only` / `workspace-write` / `danger-full-access`(迁移 3)。Codex 映射到原生沙箱与审批策略; Claude Code 映射到 `permissionMode` 并对写类工具做只读硬拒绝; DSH 的 ACP 没有沙箱字段, 如实标注"只能靠提示词与事后审计"。
+- 项目外不存在的目录不会被静默创建(返回 422 `workspace_missing`), 避免在用户机器上到处建目录。
+- 新增 `tests/workspace.test.ts`(4 项): 自定义工作区生效、缺失目录被拒、sandbox 透传、产物落在自定义工作区; 测试总数 37 → 41。
+
 ## 进行中
 
 - 无。真实任务验收(E2E-01/E2E-02)等待用户明确授权(m01951 选择"暂不授权")。

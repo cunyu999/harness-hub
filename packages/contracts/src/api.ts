@@ -44,11 +44,14 @@ export const ProfileCreateSchema = z.object({
   secretRefs: z.array(z.string()).default([]),
   requestedModel: z.string().max(200).nullable().default(null),
   requestedReasoning: z.string().max(80).nullable().default(null),
+  /** 该 harness 的工作目录; 留空表示用任务自己的工作区。 */
+  workspaceRoot: z.string().max(400).nullable().default(null),
+  /** 会话权限: 只读 / 工作区内可写 / 完全权限。 */
+  sandbox: z.enum(['read-only', 'workspace-write', 'danger-full-access']).default('workspace-write'),
   concurrencyGroup: z.string().min(1).max(80).default('default'),
   enabled: z.boolean().default(true),
   liveEnabled: z.boolean().default(false),
   env: z.record(z.string(), z.string()).default({}),
-  workspaceRoot: z.string().nullable().default(null),
   notes: z.string().max(2000).nullable().default(null),
 });
 export type ProfileCreateInput = z.infer<typeof ProfileCreateSchema>;
@@ -64,7 +67,6 @@ export const ProfilePatchSchema = z.object({
   enabled: z.boolean().optional(),
   liveEnabled: z.boolean().optional(),
   env: z.record(z.string(), z.string()).optional(),
-  workspaceRoot: z.string().nullable().optional(),
   notes: z.string().max(2000).nullable().optional(),
 });
 export type ProfilePatchInput = z.infer<typeof ProfilePatchSchema>;
@@ -120,6 +122,8 @@ export const CreateTaskSchema = z.object({
       maxDiscussionExtraRounds: z.number().int().min(0).max(2).optional(),
     })
     .default({}),
+  /** 任务工作区(绝对路径或相对项目根); 留空用任务私有目录。 */
+  workspace: z.string().max(400).nullable().optional(),
   idempotencyKey: z.string().min(1).max(200).optional(),
 });
 export type CreateTaskInput = z.infer<typeof CreateTaskSchema>;

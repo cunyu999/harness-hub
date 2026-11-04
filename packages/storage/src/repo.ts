@@ -69,8 +69,8 @@ export class Repo {
       `INSERT INTO execution_profiles
        (id, name, adapter_id, executable_ref, config_refs_json, secret_refs_json, requested_model,
         requested_reasoning, concurrency_group, enabled, capability_json, env_json, workspace_root,
-        live_enabled, notes, created_at, updated_at)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        sandbox, live_enabled, notes, created_at, updated_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       p.id,
       p.name,
       p.adapterId,
@@ -84,6 +84,7 @@ export class Repo {
       p.capabilitySnapshot ? J(p.capabilitySnapshot) : null,
       J(p.env),
       p.workspaceRoot,
+      p.sandbox,
       p.liveEnabled ? 1 : 0,
       p.notes,
       p.createdAt,
@@ -99,7 +100,7 @@ export class Repo {
     this.db.run(
       `UPDATE execution_profiles SET name=?, executable_ref=?, config_refs_json=?, secret_refs_json=?,
        requested_model=?, requested_reasoning=?, concurrency_group=?, enabled=?, capability_json=?,
-       env_json=?, workspace_root=?, live_enabled=?, notes=?, updated_at=? WHERE id=?`,
+       env_json=?, workspace_root=?, sandbox=?, live_enabled=?, notes=?, updated_at=? WHERE id=?`,
       next.name,
       next.executableRef,
       J(next.configRefs),
@@ -111,6 +112,7 @@ export class Repo {
       next.capabilitySnapshot ? J(next.capabilitySnapshot) : null,
       J(next.env),
       next.workspaceRoot,
+      next.sandbox,
       next.liveEnabled ? 1 : 0,
       next.notes,
       next.updatedAt,
@@ -205,8 +207,8 @@ export class Repo {
     this.db.run(
       `INSERT INTO tasks (id, title, objective, constraints_json, phase, lifecycle,
         current_plan_revision_id, approved_plan_revision_id, participants_revision, version,
-        limits_json, error_code, error_message, created_at, updated_at, completed_at)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        limits_json, workspace_root, error_code, error_message, created_at, updated_at, completed_at)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       t.id,
       t.title,
       t.objective,
@@ -218,6 +220,7 @@ export class Repo {
       t.participantsRevision,
       t.version,
       J(t.limits),
+      t.workspaceRoot,
       t.errorCode,
       t.errorMessage,
       t.createdAt,
@@ -1136,6 +1139,7 @@ function mapProfile(r: any): ExecutionProfile {
     capabilitySnapshot: PJ<CapabilityReport | null>(r.capability_json, null),
     env: PJ<Record<string, string>>(r.env_json, {}),
     workspaceRoot: r.workspace_root,
+    sandbox: r.sandbox ?? 'workspace-write',
     liveEnabled: B(r.live_enabled),
     notes: r.notes,
     createdAt: r.created_at,
@@ -1180,6 +1184,7 @@ function mapTask(r: any): TaskRecord {
       noEventThresholdMs: 60_000,
       maxDiscussionExtraRounds: 1,
     }),
+    workspaceRoot: r.workspace_root ?? null,
     errorCode: r.error_code,
     errorMessage: r.error_message,
     createdAt: r.created_at,

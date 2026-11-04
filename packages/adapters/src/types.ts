@@ -96,6 +96,8 @@ export interface OpenSessionOptions {
   env: Record<string, string>;
   /** 允许写入的根目录, 用于原生 sandbox 参数。 */
   writeScope: string[];
+  /** 会话权限: 只读 / 工作区内可写 / 完全权限。 */
+  sandbox?: 'read-only' | 'workspace-write' | 'danger-full-access';
   /** 原生 resume 时给出。 */
   resumeNativeSessionId?: string | null;
   /** 适配器补充选项, 来自 profile.configRefs。 */

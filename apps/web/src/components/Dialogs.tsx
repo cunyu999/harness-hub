@@ -17,6 +17,7 @@ export function NewTaskDialog({
   const [objective, setObjective] = useState('');
   const [constraints, setConstraints] = useState('');
   const [outputHint, setOutputHint] = useState('');
+  const [workspace, setWorkspace] = useState('');
   const [strong, setStrong] = useState<string[]>([]);
   const [lead, setLead] = useState<string>('');
   const [workers, setWorkers] = useState<string[]>([]);
@@ -47,6 +48,7 @@ export function NewTaskDialog({
           .map((s) => s.trim())
           .filter(Boolean),
         outputHint: outputHint.trim() || undefined,
+        workspace: workspace.trim() || null,
         strongProfileIds: strong,
         leadProfileId: lead,
         workerProfileIds: workers,
@@ -86,6 +88,17 @@ export function NewTaskDialog({
         <div className="field">
           <label>输出提示(可留空)</label>
           <input type="text" value={outputHint} onChange={(e) => setOutputHint(e.target.value)} placeholder="例如: 交付 Word 文档 + 可编译的 C++ 源码" />
+        </div>
+
+        <div className="field">
+          <label>工作目录(可留空)</label>
+          <input
+            type="text"
+            value={workspace}
+            onChange={(e) => setWorkspace(e.target.value)}
+            placeholder="例如 D:/projects/my-app; 留空则每个任务用自己的目录"
+          />
+          <div className="field-hint">所有参与者共用这个目录, 产物路径相对它计算; 留空时用 .local/runs/&lt;taskId&gt;/workspace。</div>
         </div>
 
         <div className="field">
@@ -206,6 +219,8 @@ export function ProfilesPanel({
       requestedModel: '',
       requestedReasoning: '',
       concurrencyGroup: 'default',
+    workspaceRoot: '',
+    sandbox: 'workspace-write',
       envText: '',
       notes: '',
       liveEnabled: false,
@@ -230,6 +245,8 @@ export function ProfilesPanel({
         requestedModel: draft.requestedModel.trim() || null,
         requestedReasoning: draft.requestedReasoning.trim() || null,
         concurrencyGroup: draft.concurrencyGroup.trim() || 'default',
+        workspaceRoot: draft.workspaceRoot.trim() || null,
+        sandbox: draft.sandbox,
         env: parseEnv(draft.envText),
         notes: draft.notes.trim() || null,
         liveEnabled: draft.liveEnabled,
@@ -265,6 +282,8 @@ export function ProfilesPanel({
         requestedModel: draft.requestedModel.trim() || null,
         requestedReasoning: draft.requestedReasoning.trim() || null,
         concurrencyGroup: draft.concurrencyGroup.trim() || 'default',
+        workspaceRoot: draft.workspaceRoot.trim() || null,
+        sandbox: draft.sandbox,
         env: parseEnv(draft.envText),
         notes: draft.notes.trim() || null,
         enabled: true,
@@ -452,6 +471,30 @@ export function ProfilesPanel({
                     />
                     <div className="field-hint">{reasoningHint(draft.adapterId)}</div>
                   </div>
+                  <div className="field pf-span">
+                    <label>工作目录(留空 = 任务自己的工作区)</label>
+                    <input
+                      type="text"
+                      value={draft.workspaceRoot}
+                      onChange={(e) => setDraft({ ...draft, workspaceRoot: e.target.value })}
+                      placeholder="例如 D:\projects\my-app 或 .local\scratch\demo"
+                    />
+                    <div className="field-hint">
+                      这里填的目录会成为该 harness 的 cwd 与写入根; 留空则每个任务用独立的 .local/runs/&lt;taskId&gt;/workspace。
+                    </div>
+                  </div>
+                  <div className="field">
+                    <label>会话权限</label>
+                    <select
+                      value={draft.sandbox}
+                      onChange={(e) => setDraft({ ...draft, sandbox: e.target.value as Draft['sandbox'] })}
+                    >
+                      <option value="read-only">只读(不允许改文件)</option>
+                      <option value="workspace-write">工作区内可写(推荐)</option>
+                      <option value="danger-full-access">完全权限(不限制路径)</option>
+                    </select>
+                    <div className="field-hint">按 harness 原生能力生效: Codex 用沙箱, Claude 用 permissionMode, DSH 只能靠提示词与事后审计。</div>
+                  </div>
                   <div className="field">
                     <label>并发组(同组内串行)</label>
                     <input
@@ -561,6 +604,8 @@ interface Draft {
   requestedModel: string;
   requestedReasoning: string;
   concurrencyGroup: string;
+  workspaceRoot: string;
+  sandbox: 'read-only' | 'workspace-write' | 'danger-full-access';
   envText: string;
   notes: string;
   liveEnabled: boolean;
@@ -577,6 +622,8 @@ function toDraft(p: ProfileDto): Draft {
     requestedModel: p.requestedModel ?? '',
     requestedReasoning: p.requestedReasoning ?? '',
     concurrencyGroup: p.concurrencyGroup,
+    workspaceRoot: p.workspaceRoot ?? '',
+    sandbox: (p.sandbox ?? 'workspace-write') as Draft['sandbox'],
     envText: Object.entries(p.env ?? {})
       .map(([k, v]) => `${k}=${v}`)
       .join('\n'),

@@ -401,6 +401,7 @@ export class ApiServer {
       liveEnabled: input.liveEnabled,
       env: input.env,
       workspaceRoot: input.workspaceRoot,
+      sandbox: input.sandbox ?? 'workspace-write',
       capabilitySnapshot: null,
       notes: input.notes,
       createdAt: now,
@@ -502,6 +503,7 @@ export class ApiServer {
       leadProfileId: input.leadProfileId,
       workerProfileIds: input.workerProfileIds,
       limits: input.limits,
+      workspace: input.workspace ?? null,
     });
     const out = { task, snapshot: this.engine.snapshot(task.id) };
     if (key) this.repo.putIdempotent('create-task', key, out);
@@ -523,6 +525,8 @@ export class ApiServer {
   }
 
   private workspaceOf(taskId: string): string {
+    const task = this.repo.getTask(taskId);
+    if (task) return this.engine.workspaceOf(task);
     return this.engine.workspaceDir(taskId);
   }
 

@@ -25,6 +25,17 @@
 
 证据文件: `docs/evidence/live-probe-2026-11-03.json`。
 
+### 工作区与权限模式如何下发
+
+| 能力 | Codex | Claude Code | DSH |
+| --- | --- | --- | --- |
+| 工作目录 | `thread/start` 的 `cwd` | `query({cwd})` | ACP `session/new` 的 `cwd`(必须绝对路径) |
+| 只读 | `sandbox: read-only`; 审批 `never` 让写操作直接失败 | `permissionMode: plan` + `canUseTool` 对 Write/Edit/Bash 直接 deny | 无协议支持 |
+| 工作区内可写 | `sandbox: workspace-write` | `permissionMode: default`(逐次审批) | 无协议支持 |
+| 完全权限 | `sandbox: danger-full-access`; 审批 `never` | `permissionMode: bypassPermissions` | 无协议支持 |
+
+结论: Codex 与 Claude Code 的权限是**真生效**的(前者由 Rust 侧沙箱执行, 后者由 CLI 的 permissionMode + 我们的 `canUseTool` 兜底); DSH 的 ACP 没有沙箱字段, 只能靠提示词约束与产物审计, 界面上已如实标注。
+
 ### 执行配置里的模型 / 推理强度如何生效
 
 执行配置面板里的**模型**与**推理强度**不会改写 harness 的配置文件, 只对**本程序发起的会话**做覆盖:

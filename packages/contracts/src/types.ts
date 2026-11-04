@@ -67,6 +67,11 @@ export interface CapabilityReport {
 /* 执行配置                                                            */
 /* ------------------------------------------------------------------ */
 
+/** 会话权限模式, 与 Codex 的 sandbox 取值保持一致。 */
+export type SandboxMode = 'read-only' | 'workspace-write' | 'danger-full-access';
+
+export const SANDBOX_MODES: SandboxMode[] = ['read-only', 'workspace-write', 'danger-full-access'];
+
 export interface ExecutionProfile {
   id: string;
   name: string;
@@ -84,8 +89,10 @@ export interface ExecutionProfile {
   capabilitySnapshot: CapabilityReport | null;
   /** 非敏感补充环境变量, 名字必须通过校验。 */
   env: Record<string, string>;
-  /** 允许子进程写入的根目录(项目内绝对路径), 为空表示继承 profile 默认。 */
+  /** 该 harness 的工作目录; 为空表示用任务自己的工作区。 */
   workspaceRoot: string | null;
+  /** 该 harness 的会话权限: 只读 / 工作区内可写 / 完全权限。 */
+  sandbox: SandboxMode;
   /** 是否允许该配置运行真实原生进程。 */
   liveEnabled: boolean;
   notes: string | null;
@@ -233,6 +240,8 @@ export interface TaskRecord {
   participantsRevision: number;
   version: number;
   limits: TaskLimits;
+  /** 用户指定的任务工作区(绝对路径); 为空表示 .local/runs/<taskId>/workspace。 */
+  workspaceRoot: string | null;
   errorCode: string | null;
   errorMessage: string | null;
   createdAt: string;

@@ -13,6 +13,8 @@ export interface PromptEnv {
   limits: TaskLimits;
   workspaceRoot: string;
   outputDir: string;
+  /** 本次会话的权限模式, 由执行配置决定。 */
+  sandbox?: 'read-only' | 'workspace-write' | 'danger-full-access';
 }
 
 const PLAN_SCHEMA = `{
@@ -82,11 +84,21 @@ function commonContext(env: PromptEnv, extra: Record<string, unknown> = {}): Rec
   };
 }
 
-const WORKSPACE_RULES = `工作区规则:
-1. 当前工作目录即任务 workspace, 所有产出必须写在其中; 不得写系统目录、用户主目录或其他项目。
+const SANDBOX_TEXT: Record<string, string> = {
+  'read-only': '只读: 不允许修改任何文件, 需要落盘的内容请在结果里说明, 由主控处理。',
+  'workspace-write': '可写工作区: 只能改工作区内的文件, 越界写会被适配器拒绝或要求人工批准。',
+  'danger-full-access': '完全权限: 技术上可写工作区之外, 但**仍然只准改工作区**, 越界属于违规。',
+};
+
+/** 工作区 + 权限模式说明, 每个回合按实际工作区求值。 */
+function workspaceRules(env: PromptEnv): string {
+  return `工作区规则:
+1. 当前工作目录即任务 workspace(${env.workspaceRoot}), 所有产出必须写在其中; 不得写系统目录、用户主目录或其他项目。
+   本次会话权限: ${SANDBOX_TEXT[env.sandbox ?? 'workspace-write']}
 2. 只写你被指派工作项的 writeScope 与 expectedOutputs 路径, 不要修改其他并行工作项的产物。
 3. 不要执行网络上传、发布、删除用户原始数据等操作; 需要时在结果中说明。
 4. 完成后按结果契约输出 JSON, 不要用自然语言声称"已通过"而没有实际文件或命令证据。`;
+}
 
 export function buildPlanPrompt(
   env: PromptEnv,
@@ -107,7 +119,7 @@ export function buildPlanPrompt(
 计划 JSON 结构:
 ${PLAN_SCHEMA}
 
-${WORKSPACE_RULES}`;
+${workspaceRules(env)}`;
 
   return buildPrompt({
     kind,
@@ -214,7 +226,7 @@ ${item.acceptanceCriteria.map((c) => `   - ${c}`).join('\n')}
   "suggestedNextAction": string|null
 }
 
-${WORKSPACE_RULES}`;
+${workspaceRules(env)}`;
 
   return buildPrompt({
     kind: 'work',

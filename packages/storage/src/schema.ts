@@ -328,4 +328,12 @@ CREATE TABLE delivery_acceptance (
 ALTER TABLE execution_profiles ADD COLUMN last_probe_json TEXT;
 `,
   },
+  {
+    version: 3,
+    name: 'workspace-and-sandbox',
+    sql: `
+ALTER TABLE execution_profiles ADD COLUMN sandbox TEXT NOT NULL DEFAULT 'workspace-write';
+ALTER TABLE tasks ADD COLUMN workspace_root TEXT;
+`,
+  },
 ];
