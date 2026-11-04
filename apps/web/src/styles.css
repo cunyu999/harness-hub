@@ -514,22 +514,693 @@ button {
   color: var(--text-3);
 }
 
-/* ------------------------------- 协作图 ----------------------------- */
+/* ------------------------------ 协作画布 ---------------------------- */
 
-.graph-wrap {
-  flex: 1;
-  min-height: 320px;
+.cv {
   position: relative;
-  overflow: auto;
-  background-image: radial-gradient(circle at 1px 1px, var(--dot) 1px, transparent 1.2px);
-  background-size: 26px 26px;
-  background-position: 12px 12px;
+  flex: 1;
+  min-height: 420px;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
 }
 
-.graph-wrap svg {
-  width: 100%;
-  height: auto;
-  display: block;
+.cv-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding: 11px 18px 10px;
+  border-bottom: 1px solid var(--line);
+  background: var(--glass-2);
+  backdrop-filter: blur(14px);
+  position: relative;
+  z-index: 3;
+}
+
+.cv-summary {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  font-size: 11px;
+  color: var(--text-3);
+}
+
+.cv-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--line-2);
+  background: var(--surface);
+  white-space: nowrap;
+}
+
+.cv-pill.wait {
+  color: var(--warn);
+  border-color: var(--warn-line);
+  background: var(--warn-soft);
+}
+
+.cv-pill.live {
+  color: var(--accent-2);
+  border-color: color-mix(in oklab, var(--accent-2) 38%, transparent);
+  background: color-mix(in oklab, var(--accent-2) 8%, var(--surface));
+}
+
+.cv-pulse {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 0 3px color-mix(in oklab, currentColor 16%, transparent);
+}
+
+.cv-pill.live .cv-pulse {
+  animation: cv-ring 1.9s ease-out infinite;
+}
+
+.cv-stat {
+  font-variant-numeric: tabular-nums;
+}
+
+.cv-stat b {
+  color: var(--text);
+  font-weight: 650;
+}
+
+/* 阶段步进 */
+
+.cv-steps {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.cv-steps::-webkit-scrollbar {
+  display: none;
+}
+
+.cv-steps li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  color: var(--text-3);
+  white-space: nowrap;
+  transition: background-color 160ms var(--ease), color 160ms var(--ease);
+}
+
+.cv-step-dot {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 1px solid var(--line-2);
+  background: var(--surface);
+  display: grid;
+  place-items: center;
+  font-size: 9px;
+  line-height: 1;
+  color: var(--text-3);
+  flex: none;
+}
+
+.cv-steps li.done {
+  color: var(--text-2);
+}
+
+.cv-steps li.done .cv-step-dot {
+  border-color: var(--ok-line);
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+
+.cv-steps li.now {
+  color: var(--text);
+  background: var(--accent-soft);
+}
+
+.cv-steps li.now .cv-step-dot {
+  border-color: transparent;
+  background: var(--accent);
+  color: var(--accent-ink);
+  animation: cv-step 2.6s ease-in-out infinite;
+}
+
+.cv-steps.muted-step li.now {
+  background: var(--surface-2);
+}
+
+.cv-steps.muted-step li.now .cv-step-dot {
+  background: var(--text-3);
+  animation: none;
+}
+
+/* 画布 */
+
+.cv-canvas {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  background-image: radial-gradient(circle at 1px 1px, var(--dot) 1px, transparent 1.2px);
+  background-size: 28px 28px;
+  background-position: 10px 10px;
+}
+
+.cv-lane {
+  pointer-events: none;
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  border-radius: 20px;
+  border: 1px solid color-mix(in oklab, var(--line) 70%, transparent);
+  background: linear-gradient(
+    96deg,
+    color-mix(in oklab, var(--accent-2) 5%, transparent),
+    transparent 46%
+  );
+  z-index: 0;
+}
+
+.cv-lane-label {
+  position: absolute;
+  top: 0;
+  left: 14px;
+  transform: translateY(-50%);
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  font-size: 9.5px;
+  letter-spacing: 0.04em;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+.cv-links {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.cv-link {
+  fill: none;
+  stroke: color-mix(in oklab, var(--text-3) 45%, transparent);
+  stroke-width: 1.5;
+}
+
+.cv-link.run {
+  stroke: color-mix(in oklab, var(--accent-2) 52%, transparent);
+}
+
+.cv-link.ok {
+  stroke: var(--ok-line);
+}
+
+.cv-link.wait {
+  stroke: var(--warn-line);
+}
+
+.cv-link.bad {
+  stroke: var(--bad-line);
+}
+
+.cv-link.active {
+  stroke: url(#cv-flow);
+  stroke-width: 2;
+  stroke-dasharray: 7 9;
+  animation: cv-dash 1.15s linear infinite;
+  filter: drop-shadow(0 0 4px color-mix(in oklab, var(--accent-2) 34%, transparent));
+}
+
+.cv-packet {
+  fill: var(--accent-2);
+  filter: drop-shadow(0 0 6px var(--accent-2));
+}
+
+.cv-link-label {
+  fill: var(--text-3);
+  font-size: 9.5px;
+  font-family: var(--sans);
+  paint-order: stroke;
+  stroke: var(--bg);
+  stroke-width: 4;
+  letter-spacing: 0.02em;
+}
+
+/* 智能体卡片 */
+
+.cv-agent {
+  position: absolute;
+  z-index: 1;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 5px;
+  padding: 10px 13px 9px;
+  border-radius: 16px;
+  border: 1px solid var(--line-2);
+  background: var(--surface);
+  box-shadow: var(--shadow-1);
+  cursor: pointer;
+  overflow: hidden;
+  transition:
+    transform 170ms var(--ease),
+    box-shadow 170ms var(--ease),
+    border-color 170ms var(--ease);
+}
+
+.cv-agent:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-2);
+  border-color: var(--line-3);
+}
+
+.cv-agent:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.cv-agent.selected {
+  border-color: var(--accent);
+  box-shadow:
+    0 0 0 3px var(--accent-soft),
+    var(--shadow-2);
+}
+
+.cv-agent.run {
+  border-color: color-mix(in oklab, var(--accent-2) 42%, var(--line-2));
+}
+
+.cv-agent.run::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  box-shadow: inset 0 0 26px color-mix(in oklab, var(--accent-2) 14%, transparent);
+  animation: cv-breathe 3.4s ease-in-out infinite;
+}
+
+.cv-agent.wait {
+  border-color: var(--warn-line);
+}
+
+.cv-agent.ok {
+  border-color: var(--ok-line);
+}
+
+.cv-agent.bad {
+  border-color: var(--bad-line);
+}
+
+.cv-rail {
+  position: absolute;
+  left: 0;
+  top: 12px;
+  bottom: 12px;
+  width: 3px;
+  border-radius: 3px;
+  background: var(--line-3);
+}
+
+.cv-agent.run .cv-rail {
+  background: linear-gradient(180deg, var(--accent), var(--accent-2));
+  box-shadow: 0 0 10px color-mix(in oklab, var(--accent-2) 60%, transparent);
+}
+
+.cv-agent.ok .cv-rail {
+  background: var(--ok);
+}
+
+.cv-agent.wait .cv-rail {
+  background: var(--warn);
+}
+
+.cv-agent.bad .cv-rail {
+  background: var(--bad);
+}
+
+.cv-agent-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.cv-avatar {
+  width: 26px;
+  height: 26px;
+  border-radius: 9px;
+  display: grid;
+  place-items: center;
+  font-size: 11.5px;
+  font-weight: 700;
+  flex: none;
+  color: var(--text-2);
+  background: var(--surface-3);
+  border: 1px solid var(--line-2);
+}
+
+.cv-avatar.run {
+  color: var(--accent-2);
+  border-color: color-mix(in oklab, var(--accent-2) 40%, transparent);
+  background: color-mix(in oklab, var(--accent-2) 13%, var(--surface));
+}
+
+.cv-avatar.ok {
+  color: var(--ok);
+  border-color: var(--ok-line);
+  background: var(--ok-soft);
+}
+
+.cv-avatar.wait {
+  color: var(--warn);
+  border-color: var(--warn-line);
+  background: var(--warn-soft);
+}
+
+.cv-avatar.bad {
+  color: var(--bad);
+  border-color: var(--bad-line);
+  background: var(--bad-soft);
+}
+
+.cv-avatar.deliver {
+  color: var(--accent);
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+}
+
+.cv-agent-id {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1;
+}
+
+.cv-agent-id b {
+  line-height: 1.25;
+  font-size: 12.5px;
+  font-weight: 650;
+  letter-spacing: 0.1px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cv-agent-id em {
+  line-height: 1.3;
+  font-style: normal;
+  font-size: 10.5px;
+  color: var(--text-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cv-badge {
+  font-size: 9.5px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--accent-line);
+  color: var(--accent);
+  background: var(--accent-soft);
+  white-space: nowrap;
+  flex: none;
+}
+
+.cv-badge.ok {
+  color: var(--ok);
+  border-color: var(--ok-line);
+  background: var(--ok-soft);
+}
+
+.cv-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--text-3);
+  white-space: nowrap;
+  flex: none;
+}
+
+.cv-state.run {
+  color: var(--accent-2);
+  border-color: color-mix(in oklab, var(--accent-2) 34%, transparent);
+  background: color-mix(in oklab, var(--accent-2) 9%, var(--surface));
+}
+
+.cv-state.ok {
+  color: var(--ok);
+  border-color: var(--ok-line);
+  background: var(--ok-soft);
+}
+
+.cv-state.wait {
+  color: var(--warn);
+  border-color: var(--warn-line);
+  background: var(--warn-soft);
+}
+
+.cv-state.bad {
+  color: var(--bad);
+  border-color: var(--bad-line);
+  background: var(--bad-soft);
+}
+
+.cv-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  flex: none;
+}
+
+.cv-state.run .cv-dot {
+  animation: cv-ring 1.9s ease-out infinite;
+}
+
+.cv-agent-doing {
+  line-height: 1.35;
+  font-size: 11px;
+  color: var(--text-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cv-agent.run .cv-agent-doing {
+  color: var(--text);
+}
+
+.cv-agent-foot {
+  line-height: 1.3;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 10px;
+  color: var(--text-3);
+  min-width: 0;
+}
+
+.cv-stage {
+  padding: 1px 7px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  white-space: nowrap;
+}
+
+.cv-queue {
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+.cv-elapsed {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* 交付物节点 */
+
+.cv-agent.deliver {
+  background:
+    linear-gradient(180deg, color-mix(in oklab, var(--accent) 6%, var(--surface)), var(--surface));
+}
+
+.cv-agent.deliver.ok {
+  background: linear-gradient(180deg, color-mix(in oklab, var(--ok) 8%, var(--surface)), var(--surface));
+}
+
+/* 工作项胶囊 */
+
+.cv-chip {
+  position: absolute;
+  z-index: 1;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 2px;
+  padding: 6px 11px;
+  border-radius: 12px;
+  border: 1px dashed var(--line-2);
+  background: var(--surface);
+  color: var(--text-2);
+  cursor: pointer;
+  overflow: hidden;
+  transition:
+    transform 150ms var(--ease),
+    border-color 150ms var(--ease),
+    box-shadow 150ms var(--ease);
+}
+
+.cv-chip:hover {
+  transform: translateY(-1px);
+  border-color: var(--line-3);
+  box-shadow: var(--shadow-1);
+}
+
+.cv-chip:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.cv-chip-goal {
+  line-height: 1.3;
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cv-chip-meta {
+  line-height: 1.3;
+  font-size: 9.5px;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+.cv-chip.running,
+.cv-chip.verifying {
+  border-style: solid;
+  border-color: color-mix(in oklab, var(--accent-2) 42%, transparent);
+  background: color-mix(in oklab, var(--accent-2) 7%, var(--surface));
+  color: var(--text);
+}
+
+.cv-chip.running .cv-chip-meta,
+.cv-chip.verifying .cv-chip-meta {
+  color: var(--accent-2);
+}
+
+.cv-chip.active {
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent-2) 10%, transparent);
+}
+
+.cv-chip.accepted {
+  border-style: solid;
+  border-color: var(--ok-line);
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+
+.cv-chip.accepted .cv-chip-meta {
+  color: var(--ok);
+}
+
+.cv-chip.awaiting_review,
+.cv-chip.produced,
+.cv-chip.waiting_input {
+  border-style: solid;
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+}
+
+.cv-chip.failed,
+.cv-chip.invalidated {
+  border-style: solid;
+  border-color: var(--bad-line);
+  background: var(--bad-soft);
+  color: var(--bad);
+}
+
+.cv-chip.queued,
+.cv-chip.pending,
+.cv-chip.ready {
+  color: var(--text-3);
+}
+
+.cv-chip.cancelled {
+  opacity: 0.6;
+}
+
+/* 图例 */
+
+.cv-legend {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 7px 18px;
+  border-top: 1px solid var(--line);
+  background: var(--glass-2);
+  font-size: 10.5px;
+  color: var(--text-3);
+}
+
+.cv-key {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.cv-key::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--line-3);
+}
+
+.cv-key.run::before {
+  background: var(--accent-2);
+}
+.cv-key.ok::before {
+  background: var(--ok);
+}
+.cv-key.wait::before {
+  background: var(--warn);
+}
+.cv-key.bad::before {
+  background: var(--bad);
+}
+
+.cv-note {
+  margin-left: auto;
+  opacity: 0.9;
 }
 
 .graph-empty {
@@ -543,176 +1214,61 @@ button {
   padding: 24px;
 }
 
-.graph-head {
-  position: absolute;
-  top: 14px;
-  left: 18px;
-  z-index: 2;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 11px;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--text-3);
-  pointer-events: none;
-}
-
-.graph-phase {
-  color: var(--text-2);
-  font-weight: 600;
-}
-
-.graph-sep {
-  opacity: 0.6;
-}
-
-.graph-life {
-  font-family: var(--mono);
-  letter-spacing: 0.06em;
-  padding: 2px 8px;
-  border-radius: 999px;
-  border: 1px solid var(--line-2);
-  background: var(--surface);
-}
-
-.graph-life.completed {
-  color: var(--ok);
-  border-color: var(--ok-line);
-  background: var(--ok-soft);
-}
-
-.graph-life.blocked,
-.graph-life.failed {
-  color: var(--bad);
-  border-color: var(--bad-line);
-  background: var(--bad-soft);
-}
-
-.graph-life.awaiting_plan_approval,
-.graph-life.waiting_user,
-.graph-life.paused {
-  color: var(--warn);
-  border-color: var(--warn-line);
-  background: var(--warn-soft);
-}
-
-.gnode {
-  cursor: pointer;
-  outline: none;
-}
-
-.gnode rect.card {
-  fill: var(--surface);
-  stroke: var(--line-2);
-  stroke-width: 1;
-  transition: stroke 140ms var(--ease), fill 140ms var(--ease);
-}
-
-.gnode:hover rect.card {
-  stroke: var(--line-3);
-}
-
-.gnode:focus-visible rect.card {
-  stroke: var(--accent);
-  stroke-width: 1.8;
-}
-
-.gnode.selected rect.card {
-  stroke: var(--accent);
-  stroke-width: 1.8;
-}
-
-.gnode.running rect.card {
-  stroke: color-mix(in oklab, var(--accent-2) 62%, transparent);
-}
-
-.gnode.done rect.card {
-  stroke: var(--ok-line);
-}
-
-.gnode.waiting rect.card {
-  stroke: var(--warn-line);
-}
-
-.gnode.failed rect.card {
-  stroke: var(--bad-line);
-}
-
-.glabel {
-  fill: var(--text);
-  font-size: 12.5px;
-  font-weight: 600;
-  font-family: var(--sans);
-}
-
-.gsub {
-  fill: var(--text-3);
-  font-size: 11px;
-  font-family: var(--sans);
-}
-
-.gmeta {
-  font-size: 11px;
-  font-family: var(--sans);
-}
-
-.gedge {
-  stroke: var(--line-2);
-  stroke-width: 1.3;
-  fill: none;
-}
-
-.gedge.active {
-  stroke: color-mix(in oklab, var(--accent-2) 62%, transparent);
-  stroke-dasharray: 5 6;
-  animation: dash 1.1s linear infinite;
-}
-
-.gedge.done {
-  stroke: var(--ok-line);
-}
-
-.gedge.bad {
-  stroke: var(--bad-line);
-}
-
-@keyframes dash {
+@keyframes cv-dash {
   to {
-    stroke-dashoffset: -22;
+    stroke-dashoffset: -32;
   }
 }
 
-.pulse {
-  animation: pulse 2.2s ease-in-out infinite;
-}
-
-@keyframes pulse {
+@keyframes cv-breathe {
   0%,
   100% {
-    opacity: 0.55;
+    opacity: 0.35;
   }
   50% {
     opacity: 1;
   }
 }
 
-.graph-legend {
-  position: absolute;
-  left: 16px;
-  bottom: 12px;
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  align-items: center;
-  font-size: 10.5px;
-  color: var(--text-3);
-  padding: 7px 11px;
-  border-radius: 999px;
-  border: 1px solid var(--line);
-  background: var(--glass);
-  backdrop-filter: blur(14px);
-  max-width: calc(100% - 32px);
+@keyframes cv-ring {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in oklab, currentColor 40%, transparent);
+  }
+  70% {
+    box-shadow: 0 0 0 6px transparent;
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+
+@keyframes cv-step {
+  0%,
+  100% {
+    box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent) 16%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 7px color-mix(in oklab, var(--accent) 4%, transparent);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cv-link.active,
+  .cv-pill.live .cv-pulse,
+  .cv-agent.run::after,
+  .cv-state.run .cv-dot,
+  .cv-steps li.now .cv-step-dot {
+    animation: none;
+  }
+
+  .cv-packet {
+    display: none;
+  }
+
+  .cv-agent:hover,
+  .cv-chip:hover {
+    transform: none;
+  }
 }
 
 /* ------------------------------ 节点详情 ---------------------------- */
@@ -721,10 +1277,11 @@ button {
   position: absolute;
   right: 16px;
   bottom: 16px;
-  width: min(372px, calc(100% - 32px));
-  max-height: 64%;
+  z-index: 6;
+  width: min(400px, calc(100% - 32px));
+  max-height: 70%;
   overflow: auto;
-  background: var(--glass);
+  background: var(--surface);
   border: 1px solid var(--line-2);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-2);

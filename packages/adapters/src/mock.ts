@@ -44,14 +44,20 @@ function planFor(context: Record<string, unknown>): Record<string, unknown> {
   const workers = participants.filter((p) => p.role === 'worker');
   const lead = strong.find((p) => p.isLead) ?? strong[0];
   const seeds = (context.workItemSeeds as string[]) ?? null;
-  const count = seeds ? seeds.length : Math.max(1, Math.min(2, workers.length || 2));
+  // 多个执行者时给出互不依赖的工作项, 用于演示并发泳道; 单个执行者保持串行。
+  const parallel = workers.length >= 2;
+  const count = seeds
+    ? seeds.length
+    : parallel
+      ? Math.min(6, workers.length * 2)
+      : Math.max(1, Math.min(2, workers.length || 2));
   const items = Array.from({ length: count }, (_, i) => {
     const assignee = workers[i % Math.max(1, workers.length)] ?? lead;
     const path = `${(context.outputDir as string) ?? 'deliverables'}/part-${i + 1}.md`;
     return {
       id: `wi-${i + 1}`,
       goal: seeds ? seeds[i] : `完成第 ${i + 1} 部分工作`,
-      dependencies: i === 0 ? [] : [`wi-${i}`],
+      dependencies: parallel || i === 0 ? [] : [`wi-${i}`],
       assignedParticipantId: assignee ? assignee.id : null,
       inputs: [],
       expectedOutputs: [

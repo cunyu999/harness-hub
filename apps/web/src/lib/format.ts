@@ -146,3 +146,28 @@ export function roleLabel(role: string): string {
       return role;
   }
 }
+
+/** 自然增长的耗时, 不表示完成度。 */
+export function duration(ms: number | null | undefined): string {
+  if (ms === null || ms === undefined || !Number.isFinite(ms) || ms < 0) return '—';
+  const total = Math.floor(ms / 1000);
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+}
+
+/** 头像用的缩写: 中文取首字, 英文取每个单词首字母(最多两个)。 */
+export function initials(name: string): string {
+  const trimmed = name.trim().replace(/[()[\]{}]/g, ' ');
+  if (!trimmed) return '?';
+  const words = trimmed.split(/\s+/).filter(Boolean);
+  const cjk = /[\u4e00-\u9fa5]/;
+  if (cjk.test(trimmed)) return Array.from(trimmed)[0] ?? '?';
+  if (words.length === 1) return (Array.from(words[0])[0] ?? '?').toUpperCase();
+  return words
+    .slice(0, 2)
+    .map((w) => (Array.from(w)[0] ?? '').toUpperCase())
+    .join('');
+}

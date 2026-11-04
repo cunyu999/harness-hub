@@ -214,7 +214,7 @@ export function App() {
           <section className="canvas">
             {detail ? (
               <>
-                <CollabGraph detail={detail} selection={selection} onSelect={setSelection} />
+                <CollabGraph detail={detail} events={state.events} selection={selection} onSelect={setSelection} />
                 {selection ? (
                   <NodeDetail
                     detail={detail}
