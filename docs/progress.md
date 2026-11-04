@@ -177,4 +177,18 @@
 - **回答澄清并继续**: 工作项进入 `waiting_input` 后, 用户在对话里选"回答"(intent=answer), 回答会写进该工作项的 `user_note`(迁移 4), 该项回到 `pending` 继续执行, 不再被当成闲聊。
 - **单项重试**: `POST /api/tasks/:id/work-items/:itemId/retry`, 就地重跑某一项(可附 note), 不产生新计划版本, 已接受的其他项不受影响; 交付后重试会重新走审核与交付。
 
-测试: 新增 `tests/recover.test.ts`(2 项), 合计 **45/45**。
+测试: 新增 `tests/recover.test.ts`(2 项), 合计 **48/48**。
+
+## 复核席位不再被环境限制拖死
+
+真实 E2E 里, 复核类工作项(没有声明文件产物)尝试在沙箱内执行二进制, 拿到 exit 127 / 空输出后返回 `needs_input`, 任务停在 `waiting_user` 等人来救。这不是模型能力问题, 是提示词没给它"只读复核"的角色边界。
+
+修复(纯提示词层, 不改状态机):
+
+- 新增 `REVIEW_ONLY_RULE`: 只读复核项不得重新编译/执行/改文件, 判据是"产物内容 + 验证记录 + sha256"; 环境受限时把检查记为 skipped, 照常给结论, **环境限制不是 needs_input 的理由**。
+- 新增 `VALIDATION_SHELL_NOTE`: 计划阶段就要知道 `validationCommand` 在 Windows 上是 `cmd.exe /d /s /c`、没有 grep/sed、`./x` 会被归一成 `.\\x`。
+- 审核提示补两条: 环境限制不构成审核阻塞(只有"产物缺失/无法读取"才 `unable_to_review`); Windows 上要跑命令用 `cmd /c "相对路径"`(Claude Code 的 Bash 是 Git Bash, 反斜杠路径会 127)。
+
+实测: 对已交付任务 `task_aa47d176ed1142dc9206` 的复核项执行单项重试, **90 秒**内完成(此前是 18 分钟反复执行 + 永久阻塞), 复核结论自述"read-only review, did not re-execute anything, relying on the program verification record", 任务重新走到 `delivery/completed`, 两轮审核均 approve。
+
+测试: 新增 `tests/prompts.test.ts`(3 项, 锁住这三条提示词约束), 合计 **48/48**。

@@ -90,6 +90,30 @@ const SANDBOX_TEXT: Record<string, string> = {
   'danger-full-access': '完全权限: 技术上可写工作区之外, 但**仍然只准改工作区**, 越界属于违规。',
 };
 
+/**
+ * 验证命令的执行环境说明。真实 E2E 里计划给出了 `grep ...` 与 `./hello.exe`,
+ * 在 Windows 的 cmd 下分别报"不是内部或外部命令", 导致整个任务卡在验证阶段。
+ */
+export const VALIDATION_SHELL_NOTE = `validationCommand 的执行环境:
+- 在任务 workspace 根目录执行, 由程序调用系统外壳: Windows 是 \`cmd.exe /d /s /c\`, 类 Unix 是 \`/bin/sh -c\`。
+- Windows 上没有 \`grep/sed/awk/cat\`; 要匹配文本用 \`findstr /c:"...\`\`\` 或用 powershell。
+- Windows 上不要写 \`./hello.exe\`, 会被归一成 \`.\\hello.exe\`, 直接写 \`hello.exe\` 或 \`.\\hello.exe\`。
+- 命令必须不交互, 退出码 0 才算通过; 需要多条命令时用 \`&&\` 串联或写成脚本文件。
+- 只读复核类工作项不需要重新编译/执行, 用已登记产物与验证记录核对即可。`;
+
+/**
+ * 只读复核类工作项(没有声明文件产物)的纪律。
+ * 真实 E2E 里复核席位因为"沙箱里执行二进制失败"直接返回 needs_input, 把任务拖死;
+ * 这里明确告诉它: 复核的依据是产物与验证记录, 不是"我也跑一遍"。
+ */
+export const REVIEW_ONLY_RULE = `本项是只读复核: 不要重新编译、不要重新执行二进制, 也不要修改任何文件。
+判据按顺序:
+  a. 产物是否存在、内容是否满足验收标准(直接读文件);
+  b. 程序记录里的验证项是否通过(verification 记录带命令与退出码);
+  c. 产物 sha256 与记录是否一致。
+如果你确实尝试执行命令但环境不允许(沙箱/权限拒绝, 常见 exit 127 或空输出), 把该检查记为 skipped 并在 summary 里写"未重新执行, 依据程序验证记录", 然后照常给出结论; 环境限制不是 needs_input 的理由。
+`;
+
 /** 工作区 + 权限模式说明, 每个回合按实际工作区求值。 */
 function workspaceRules(env: PromptEnv): string {
   return `工作区规则:
@@ -119,6 +143,7 @@ export function buildPlanPrompt(
   - 只改用户点名或确实不达标的部分; context.existingArtifacts 里没有被点名的文件必须原样保留(同路径、不重写)。
   - 新计划要能独立执行, 但不要推翻已经通过的内容; 在 objectives/assumptions 里写清"这次改了什么、为什么"。
   - 可以在 goal 里引用已有产物的路径作为输入。
+- ${VALIDATION_SHELL_NOTE}
 
 计划 JSON 结构:
 ${PLAN_SCHEMA}
@@ -218,6 +243,7 @@ export function buildWorkPrompt(
 1. 直接在工作区完成实际工作并写入下列产物(相对 workspace 根目录):
 ${outputs || '- (本项没有声明文件产物, 请在结果中说明实际完成内容)'}
 2. 允许写入范围: ${item.writeScope.join(', ') || '(仅输出文件)'}
+${item.expectedOutputs.length === 0 ? REVIEW_ONLY_RULE : ''}
 3. 验收标准:
 ${item.acceptanceCriteria.map((c) => `   - ${c}`).join('\n')}
 ${userNoteBlock}5. 完成后只输出一个 JSON 对象:
@@ -304,7 +330,9 @@ ${othersBlock}
 判定规则:
 - 只有实际检查过必要内容才可 approve; 无法访问产物时用 unable_to_review。
 - 有 blocker/major 问题时用 changes_required, 并给出可执行的修复方向。
-- 正确性/验收冲突等重大分歧用 needs_user_decision。`;
+- 正确性/验收冲突等重大分歧用 needs_user_decision。
+- 环境限制(沙箱/权限不允许执行某个命令)不构成审核阻塞: 用已登记产物 + 程序验证记录判断即可, 只有"产物缺失或无法读取"才用 unable_to_review。
+- Windows 上如果要自己跑命令, 用 cmd /c "相对路径"(Claude Code 的 Bash 是 Git Bash, 反斜杠路径会 127)。`;
 
   return buildPrompt({
     kind: args.mode === 'crosscheck' ? 'review.crosscheck' : 'review',
