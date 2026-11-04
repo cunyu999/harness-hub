@@ -1553,6 +1553,62 @@ a.link:hover {
   background-size: 24px 24px;
 }
 
+/* 连线画在卡片背后的 SVG 里, 只存在于阶段之间的走廊 */
+.cx-canvas {
+  position: relative;
+  max-width: 1120px;
+  margin: 0 auto;
+}
+
+.cx-wire {
+  position: absolute;
+  inset: 0;
+  overflow: visible;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.cx-wire-path {
+  fill: none;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-dasharray: 2 6;
+  opacity: 0.6;
+  transition: opacity 0.2s ease;
+}
+
+.cx-wire-glow {
+  fill: none;
+  stroke-width: 5;
+  opacity: 0.1;
+  stroke-linecap: round;
+}
+
+.cx-wire g.active .cx-wire-path {
+  stroke-dasharray: 6 6;
+  opacity: 0.95;
+  animation: cx-dash 1.5s linear infinite;
+}
+
+.cx-wire g.active .cx-wire-glow {
+  opacity: 0.26;
+}
+
+.cx-spark {
+  opacity: 0.95;
+  filter: drop-shadow(0 0 3px currentColor);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cx-wire g.active .cx-wire-path {
+    animation: none;
+  }
+
+  .cx-spark {
+    display: none;
+  }
+}
+
 .cx-stage {
   display: flex;
   flex-direction: column;
@@ -1880,6 +1936,8 @@ a.link:hover {
 }
 
 .cx-stage-body {
+  position: relative;
+  z-index: 1;
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(238px, 1fr));
   gap: 12px;

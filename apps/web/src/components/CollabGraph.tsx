@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { TaskDetail } from '../api';
 import type { EventEnvelope } from '../../../../packages/contracts/src/events';
 import type { ManagedSession, Participant, RunAttempt, TaskPhase, WorkItem } from '../../../../packages/contracts/src/types';
@@ -82,6 +82,36 @@ export function CollabGraph({
   const running = seats.some((s) => s.tone === 'run');
   const now = useNow(running);
 
+  const canvasRef = useRef<HTMLDivElement | null>(null);
+  const [wires, setWires] = useState<Wire[]>([]);
+  const [wireBox, setWireBox] = useState({ w: 0, h: 0 });
+
+  // 连线坐标只能量出来: 阶段内部是 CSS 网格自动换行, 不量就不知道卡片落在哪
+  useLayoutEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const measure = () => {
+      const cr = canvas.getBoundingClientRect();
+      const box = new Map<string, { x: number; y: number; w: number; h: number }>();
+      canvas.querySelectorAll<HTMLElement>('[data-ck]').forEach((el) => {
+        const key = el.dataset.ck;
+        if (!key) return;
+        const r = el.getBoundingClientRect();
+        box.set(key, { x: r.left - cr.left, y: r.top - cr.top, w: r.width, h: r.height });
+      });
+      setWires(buildWires(stages, box));
+      setWireBox({ w: canvas.scrollWidth, h: canvas.scrollHeight });
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(canvas);
+    window.addEventListener('resize', measure);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener('resize', measure);
+    };
+  }, [stages]);
+
   const counts = {
     run: seats.filter((s) => s.tone === 'run').length,
     queue: detail.workItems.filter((w) => ['pending', 'ready', 'queued'].includes(w.state)).length,
@@ -125,15 +155,33 @@ export function CollabGraph({
       </div>
 
       <div className="cx-flow">
+        <div className="cx-canvas" ref={canvasRef}>
+          {wires.length > 0 && wireBox.w > 0 ? (
+            <svg
+              className="cx-wire"
+              width={wireBox.w}
+              height={wireBox.h}
+              viewBox={`0 0 ${wireBox.w} ${wireBox.h}`}
+              aria-hidden="true"
+            >
+              {wires.map((w) => (
+                <g key={w.key} className={w.active ? 'active' : ''}>
+                  <path d={w.d} className="cx-wire-glow" style={{ stroke: w.color }} />
+                  <path d={w.d} className="cx-wire-path" style={{ stroke: w.color }} />
+                  {w.active ? (
+                    <circle r="2.6" className="cx-spark" style={{ fill: w.color }}>
+                      <animateMotion dur="2.8s" repeatCount="indefinite" path={w.d} />
+                    </circle>
+                  ) : null}
+                </g>
+              ))}
+            </svg>
+          ) : null}
         {stages.map((stage, i) => (
           <section key={stage.key} className="cx-stage" aria-label={stage.title}>
             {i > 0 ? (
               <div className={`cx-arrow ${anyRunning(stage) || anyRunning(stages[i - 1]) ? 'active' : ''}`} aria-hidden="true">
                 <span className="cx-arrow-label">{stage.inflow}</span>
-                <svg className="cx-arrow-line" width="16" height="28" viewBox="0 0 16 28">
-                  <path d="M 8 0 L 8 20" className="cx-link" />
-                  <path d="M 3.8 15.6 L 8 21.6 L 12.2 15.6" className="cx-link" />
-                </svg>
               </div>
             ) : null}
 
@@ -147,6 +195,7 @@ export function CollabGraph({
                 c.seat ? (
                   <SeatCard
                     key={c.key}
+                    ck={c.key}
                     seat={c.seat}
                     now={now}
                     selected={selection?.kind === 'participant' && selection.id === (c.seat as Seat).participant.id}
@@ -155,6 +204,7 @@ export function CollabGraph({
                 ) : c.select ? (
                   <button
                     key={c.key}
+                    data-ck={c.key}
                     type="button"
                     className={`cx-card plain clickable ${c.tone ?? ''} ${selection?.kind === c.select ? 'selected' : ''}`}
                     onClick={() => onSelect(c.select === 'plan' ? { kind: 'plan' } : { kind: 'delivery' })}
@@ -180,7 +230,7 @@ export function CollabGraph({
                     <span className="cx-card-more">查看详情 ›</span>
                   </button>
                 ) : (
-                  <div key={c.key} className={`cx-card plain ${c.tone ?? ''}`}>
+                  <div key={c.key} data-ck={c.key} className={`cx-card plain ${c.tone ?? ''}`}>
                     <span className="cx-card-rail" style={{ background: c.accent ?? 'var(--line-3)' }} />
                     <span className="cx-card-top">
                       <span className="cx-avatar" style={{ background: c.accentSoft ?? 'var(--surface-2)', color: c.accent ?? 'var(--text-2)' }}>
@@ -204,6 +254,7 @@ export function CollabGraph({
             </div>
           </section>
         ))}
+        </div>
       </div>
 
       <div className="cx-legend">
@@ -243,11 +294,13 @@ export function PhaseStepper({ phase, lifecycle }: { phase: TaskPhase; lifecycle
 /* ------------------------------ 卡片 ------------------------------ */
 
 function SeatCard({
+  ck,
   seat,
   now,
   selected,
   onSelect,
 }: {
+  ck: string;
   seat: Seat;
   now: number;
   selected: boolean;
@@ -261,6 +314,7 @@ function SeatCard({
     <button
       type="button"
       data-seat={seat.participant.id}
+      data-ck={ck}
       className={`cx-card ${seat.tone} ${seat.root ? 'root' : ''} ${selected ? 'selected' : ''}`}
       onClick={onSelect}
       aria-pressed={selected}
@@ -344,6 +398,80 @@ interface Stage {
   cards: CardModel[];
   /** 从上一条阶段流到这一段的动作名, 画在阶段之间的空隙里 */
   inflow: string;
+}
+
+interface Wire {
+  key: string;
+  d: string;
+  color: string;
+  active: boolean;
+}
+
+/**
+ * 阶段之间的连线: 从上一阶段每张卡的底边中点, 弯到下一阶段每张卡的顶边中点。
+ * 全部是三次贝塞尔, 控制点只落在两阶段之间的走廊里, 因此不会压到卡片。
+ */
+function buildWires(
+  stages: Stage[],
+  box: Map<string, { x: number; y: number; w: number; h: number }>,
+): Wire[] {
+  const out: Wire[] = [];
+  for (let i = 0; i < stages.length - 1; i += 1) {
+    const from = stages[i].cards.filter((c) => c.seat !== null);
+    const to = stages[i + 1].cards;
+    if (from.length === 0 || to.length === 0) continue;
+
+    const pairs: { a: CardModel; b: CardModel }[] = [];
+    if (from.length * to.length <= 8) {
+      for (const a of from) for (const b of to) pairs.push({ a, b });
+    } else {
+      // 太多对就每条目标卡只接最近的一两张来源卡, 避免糊成一团
+      for (const b of to) {
+        const B = box.get(b.key);
+        const bx = B ? B.x + B.w / 2 : 0;
+        const sorted = [...from].sort((p, q) => {
+          const P = box.get(p.key);
+          const Q = box.get(q.key);
+          return Math.abs((P ? P.x + P.w / 2 : 0) - bx) - Math.abs((Q ? Q.x + Q.w / 2 : 0) - bx);
+        });
+        pairs.push({ a: sorted[0], b });
+        if (sorted[1] && from.length > 2) pairs.push({ a: sorted[1], b });
+      }
+    }
+
+    // 同一张卡发出多条线时, 起点沿底边铺开, 避免全部挤在中轴线上
+    const bySource = new Map<string, { a: CardModel; b: CardModel }[]>();
+    for (const pair of pairs) {
+      const list = bySource.get(pair.a.key) ?? [];
+      list.push(pair);
+      bySource.set(pair.a.key, list);
+    }
+
+    for (const list of bySource.values()) {
+      const A = box.get(list[0].a.key);
+      if (!A) continue;
+      const spread = Math.min(34, A.w * 0.3);
+      list.forEach(({ a, b }, index) => {
+        const B = box.get(b.key);
+        if (!B) return;
+        const offset = list.length === 1 ? 0 : ((index - (list.length - 1) / 2) / (list.length - 1)) * 2 * spread;
+        const x1 = A.x + A.w / 2 + offset;
+        const y1 = A.y + A.h;
+        const x2 = B.x + B.w / 2;
+        const y2 = B.y;
+        const gap = Math.max(22, y2 - y1);
+        const c1 = y1 + gap * 0.62;
+        const c2 = y2 - gap * 0.62;
+        out.push({
+          key: `${a.key}->${b.key}`,
+          d: `M ${x1.toFixed(1)} ${y1.toFixed(1)} C ${x1.toFixed(1)} ${c1.toFixed(1)}, ${x2.toFixed(1)} ${c2.toFixed(1)}, ${x2.toFixed(1)} ${y2.toFixed(1)}`,
+          color: a.accent ?? 'var(--line-3)',
+          active: (a.seat?.tone ?? 'idle') === 'run' || (b.seat?.tone ?? 'idle') === 'run',
+        });
+      });
+    }
+  }
+  return out;
 }
 
 /**
