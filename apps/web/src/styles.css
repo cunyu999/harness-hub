@@ -2152,3 +2152,86 @@ a.link:hover {
   font-size: 11.5px;
   line-height: 1.5;
 }
+
+/* 对话对象与席位设置 */
+.conv-target {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line);
+  flex-wrap: wrap;
+}
+.conv-target select {
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 4px 8px;
+  font-size: 12px;
+  color: var(--text);
+  max-width: 220px;
+}
+.btn.tiny {
+  padding: 3px 8px;
+  font-size: 11.5px;
+  border-radius: 7px;
+}
+.tiny-select {
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 3px 6px;
+  font-size: 11.5px;
+  color: var(--text);
+}
+.conv-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-2);
+}
+.cs-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.cs-label {
+  width: 62px;
+  flex: 0 0 62px;
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+.cs-row input {
+  flex: 1 1 auto;
+  width: 100%;
+  min-width: 0;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 5px 8px;
+  font-size: 12px;
+  color: var(--text);
+}
+.cs-row select {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 5px 8px;
+  font-size: 12px;
+  color: var(--text);
+}
+.cs-hint {
+  margin: 0;
+  line-height: 1.5;
+}
+.cs-notice {
+  font-size: 11.5px;
+  color: var(--ok);
+  background: var(--ok-soft);
+  border: 1px solid var(--ok-line);
+  border-radius: 8px;
+  padding: 6px 8px;
+  line-height: 1.5;
+}

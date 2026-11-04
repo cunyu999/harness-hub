@@ -267,7 +267,7 @@ export class Repo {
   insertParticipant(p: Participant): void {
     this.db.run(
       `INSERT INTO participants (id, task_id, profile_snapshot_id, profile_id, role, is_lead,
-        allowed_phases_json, display_name, created_at) VALUES (?,?,?,?,?,?,?,?,?)`,
+        allowed_phases_json, display_name, created_at, workspace_root, sandbox) VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
       p.id,
       p.taskId,
       p.profileSnapshotId,
@@ -277,7 +277,24 @@ export class Repo {
       J(p.allowedPhases),
       p.displayName,
       p.createdAt,
+      p.workspaceRoot ?? null,
+      p.sandbox ?? null,
     );
+  }
+
+  updateParticipant(
+    participantId: string,
+    patch: { workspaceRoot?: string | null; sandbox?: string | null },
+  ): Participant | null {
+    const cur = this.getParticipant(participantId);
+    if (!cur) return null;
+    this.db.run(
+      'UPDATE participants SET workspace_root = ?, sandbox = ? WHERE id = ?',
+      patch.workspaceRoot !== undefined ? patch.workspaceRoot : (cur.workspaceRoot ?? null),
+      patch.sandbox !== undefined ? patch.sandbox : (cur.sandbox ?? null),
+      participantId,
+    );
+    return this.getParticipant(participantId);
   }
 
   listParticipants(taskId: string): Participant[] {
@@ -1230,6 +1247,8 @@ function mapParticipant(r: any): Participant {
     isLead: B(r.is_lead),
     allowedPhases: PJ<TaskPhase[]>(r.allowed_phases_json, []),
     displayName: r.display_name,
+    workspaceRoot: r.workspace_root ?? null,
+    sandbox: r.sandbox ?? null,
     createdAt: r.created_at,
   };
 }

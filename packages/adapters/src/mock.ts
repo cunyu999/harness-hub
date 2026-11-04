@@ -326,10 +326,11 @@ export class MockAdapter implements HarnessAdapter {
         });
         settleActivity('tool_running');
         const written: string[] = [];
+        const outRoot = opts.env.HH_WORKSPACE || opts.cwd;
         for (const spec of outputs) {
           const rel = sanitizeRel(spec.relativePath);
-          const abs = join(opts.cwd, rel);
-          if (!isInside(opts.cwd, abs)) {
+          const abs = join(outRoot, rel);
+          if (!isInside(outRoot, abs)) {
             emit({ kind: 'tool.completed', callId: 'mock-write', ok: false, outputSummary: '路径越界' });
             return JSON.stringify(
               {

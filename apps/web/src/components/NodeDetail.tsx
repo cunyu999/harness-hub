@@ -110,12 +110,14 @@ export function NodeDetail({
   events,
   onClose,
   onChanged,
+  onChat,
 }: {
   detail: TaskDetail;
   selection: GraphSelection;
   events: EventEnvelope[];
   onClose: () => void;
   onChanged: () => void;
+  onChat?: (participantId: string) => void;
 }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);

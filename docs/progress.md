@@ -210,3 +210,12 @@
 - 两张卡都可点: 悬停出现"查看详情 ›", 选中态有强调色描边; **再点一次同一个节点/卡片即收起**, 不必去按右上角关闭。
 
 截图: `docs/screenshots/13-plan-detail.png`、`14-delivery-detail.png`。
+
+## 角色大工作区 + 席位小工作区, 以及与任意席位对话
+
+- 任务目录结构: `deliverables/` + `planner/<席位>/` + `worker/<席位>/`; 会话 cwd 从"任务工作区根"改为"席位小工作区", 交付物仍统一写到 `<base>/deliverables`(提示词里给绝对路径, mock 适配器也照此写)。
+- 席位(participants)新增 `workspace_root` 与 `sandbox` 两列(迁移 5), 支持逐个席位改工作区与权限; 权限优先级: 席位 > 执行配置。
+- 新建任务默认按角色给权限: planner = 完全权限, worker = 工作区内可写, 对话框里可改(API: `plannerSandbox` / `workerSandbox`)。
+- 对话页重做: 可选对话对象(主控或任一席位)、可就地改该席位的工作目录与会话权限、可只看与它的对话; 画布卡片详情里加「和它对话」。
+- 新增 `GET/PATCH /api/tasks/:id/participants/:participantId`; `POST /messages` 支持 `participantId`。
+- 修掉两个实现缺陷: `mapParticipant` 漏读新列导致 API 看不到沙箱/工作区; mock 适配器把产物写到了席位 cwd 而不是 `deliverables`。

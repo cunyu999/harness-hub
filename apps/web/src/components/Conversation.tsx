@@ -4,6 +4,14 @@ import { api } from '../api';
 import type { StreamDelta } from '../store';
 import { clock, shortId } from '../lib/format';
 
+type SandboxMode = 'read-only' | 'workspace-write' | 'danger-full-access';
+
+const SANDBOX_LABEL: Record<SandboxMode, string> = {
+  'read-only': '只读',
+  'workspace-write': '工作区内可写',
+  'danger-full-access': '完全权限',
+};
+
 /**
  * 消息正文: 结构化回合(计划/讨论/结果 JSON)默认折叠, 避免长 JSON 淹没对话。
  */
@@ -37,24 +45,60 @@ export function Conversation({
   detail,
   deltas,
   onChanged,
+  target,
+  onTargetChange,
 }: {
   detail: TaskDetail;
   deltas: StreamDelta[];
   onChanged: () => void;
+  target: string | null;
+  onTargetChange: (participantId: string | null) => void;
 }) {
   const [text, setText] = useState('');
   const [intent, setIntent] = useState<'chat' | 'instruction' | 'answer' | 'supplement'>('chat');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [showSettings, setShowSettings] = useState(false);
+  const [onlyThis, setOnlyThis] = useState(false);
+  const [wsDraft, setWsDraft] = useState('');
+  // 展示成相对任务工作区的路径, 太长时更好读
+  const toRelative = (abs: string | null | undefined): string => {
+    if (!abs) return '';
+    const base = detail.workspace;
+    if (base && abs.startsWith(base)) return abs.slice(base.length).replace(/^[\\/]+/, '');
+    return abs;
+  };
+  const [sandboxDraft, setSandboxDraft] = useState<SandboxMode>('workspace-write');
+  const [saving, setSaving] = useState(false);
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
 
   const messages = useMemo(() => detail.messages ?? [], [detail.messages]);
+  const participants = detail.participants ?? [];
+  const lead = participants.find((p) => p.isLead) ?? null;
+  const currentId = target ?? lead?.id ?? null;
+  const current = participants.find((p) => p.id === currentId) ?? lead;
+  const isLeadTarget = !!current && current.isLead;
+
+  // 切换席位时, 把它的工作区/权限填进设置面板
+  useEffect(() => {
+    if (!current) return;
+    setWsDraft(toRelative(current.workspaceRoot));
+    setSandboxDraft((current.sandbox as SandboxMode) ?? 'workspace-write');
+    setShowSettings(false);
+    setNotice(null);
+  }, [current?.id, current?.workspaceRoot, current?.sandbox]);
 
   useEffect(() => {
     const el = scrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [messages.length, deltas.length]);
+
+  const visible = useMemo(() => {
+    if (!onlyThis || !current || isLeadTarget) return messages;
+    return messages.filter((m) => m.role === 'user' || m.participantId === current.id);
+  }, [messages, onlyThis, current?.id, isLeadTarget]);
 
   const send = async () => {
     const t = text.trim();
@@ -62,7 +106,11 @@ export function Conversation({
     setBusy(true);
     setErr(null);
     try {
-      await api.sendMessage(detail.task.id, { text: t, intent: intent === 'supplement' ? 'supplement' : intent });
+      await api.sendMessage(detail.task.id, {
+        text: t,
+        intent: intent === 'supplement' ? 'supplement' : intent,
+        participantId: isLeadTarget ? null : (current?.id ?? null),
+      });
       setText('');
       onChanged();
     } catch (e) {
@@ -72,11 +120,102 @@ export function Conversation({
     }
   };
 
+  const saveSettings = async () => {
+    if (!current) return;
+    setSaving(true);
+    setErr(null);
+    setNotice(null);
+    try {
+      const ws = wsDraft.trim();
+      const res = await api.updateParticipant(detail.task.id, current.id, {
+        workspaceRoot: ws.length > 0 ? ws : null,
+        sandbox: sandboxDraft,
+      });
+      const resolved = (res.participant as { workspaceRoot?: string | null }).workspaceRoot;
+      setNotice(
+        `已保存。${resolved ? `工作目录: ${resolved}` : '工作目录已回到自动分配'} · 权限: ${SANDBOX_LABEL[sandboxDraft]}。改动在下一个回合生效。`,
+      );
+      onChanged();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <div className="conv">
+      <div className="conv-target">
+        <label className="small muted" htmlFor="conv-target-select">
+          对话对象
+        </label>
+        <select
+          id="conv-target-select"
+          value={currentId ?? ''}
+          onChange={(e) => {
+            const next = e.target.value;
+            onTargetChange(participants.find((p) => p.id === next && !p.isLead) ? next : null);
+          }}
+        >
+          {lead ? <option value={lead.id}>{lead.displayName}(主控)</option> : null}
+          {participants
+            .filter((p) => !p.isLead)
+            .map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.displayName}({p.role === 'strong' ? '强模型' : '执行者'})
+              </option>
+            ))}
+        </select>
+        <button className="btn tiny" onClick={() => setShowSettings((v) => !v)}>
+          {showSettings ? '收起设置' : '工作区 / 权限'}
+        </button>
+        {!isLeadTarget ? (
+          <label className="small muted row" style={{ gap: 5, alignItems: 'center' }}>
+            <input type="checkbox" checked={onlyThis} onChange={(e) => setOnlyThis(e.target.checked)} />
+            只看与它的对话
+          </label>
+        ) : null}
+      </div>
+
+      {showSettings && current ? (
+        <div className="conv-settings">
+          <div className="cs-row">
+            <span className="cs-label">工作目录</span>
+            <input
+              value={wsDraft}
+              placeholder="绝对路径, 或相对任务工作区(例如 planner/claude); 留空 = 自动分配"
+              onChange={(e) => setWsDraft(e.target.value)}
+            />
+          </div>
+          <div className="cs-row">
+            <span className="cs-label">会话权限</span>
+            <select value={sandboxDraft} onChange={(e) => setSandboxDraft(e.target.value as SandboxMode)}>
+              {(Object.keys(SANDBOX_LABEL) as SandboxMode[]).map((m) => (
+                <option key={m} value={m}>
+                  {SANDBOX_LABEL[m]}
+                </option>
+              ))}
+            </select>
+            <button className="btn primary tiny" disabled={saving} onClick={() => void saveSettings()}>
+              {saving ? '保存中…' : '保存'}
+            </button>
+          </div>
+          <p className="small muted cs-hint">
+            权限由 harness 原生能力执行: Codex 用沙箱、Claude 用 permissionMode + 工具放行、DSH 只能靠提示词与事后审计。
+            改动在下一个回合生效, 正在跑的会话不受影响。
+          </p>
+          {notice ? <div className="cs-notice">{notice}</div> : null}
+        </div>
+      ) : null}
+
       <div className="conv-scroll" ref={scrollRef}>
-        {messages.length === 0 ? <div className="empty">还没有消息。主控的计划讨论、执行摘要与交付说明都会出现在这里。</div> : null}
-        {messages.map((m) => {
+        {visible.length === 0 ? (
+          <div className="empty">
+            还没有消息。主控的计划讨论、各席位的执行摘要与交付说明都会出现在这里;
+            在上方切换对话对象, 可以直接和某个 harness 说话。
+          </div>
+        ) : null}
+        {visible.map((m) => {
           const who =
             m.role === 'user'
               ? '你'
@@ -84,7 +223,7 @@ export function Conversation({
                 ? '主控'
                 : m.role === 'system'
                   ? '系统'
-                  : detail.participants.find((p) => p.id === m.participantId)?.displayName ?? '参与者';
+                  : participants.find((p) => p.id === m.participantId)?.displayName ?? '参与者';
           return (
             <div key={m.id} className={`msg ${m.role === 'user' ? 'user' : m.role === 'system' ? 'system' : ''}`}>
               <div className="msg-head">
@@ -113,7 +252,7 @@ export function Conversation({
         <div className="revise-hint">
           <span>
             任务已{detail.task.lifecycle === 'completed' ? '交付' : detail.task.lifecycle === 'blocked' ? '受阻' : '失败'}。
-            不满意可以提修改要求: 选「补充计划」→ 写清楚要改哪里 → 发送。
+            不满意可以提修改要求: 选「补充 / 要求修改」→ 写清楚要改哪里 → 发送。
           </span>
           <button
             className="btn"
@@ -128,11 +267,15 @@ export function Conversation({
       ) : null}
       <div className="composer">
         <div className="row" style={{ justifyContent: 'space-between' }}>
-          <span className="small muted">统一主对话: 你的消息会交给主控会话处理, 不额外启动未声明的参与者。</span>
+          <span className="small muted">
+            {current
+              ? `正在和 ${current.displayName}(${isLeadTarget ? '主控' : current.role === 'strong' ? '强模型' : '执行者'})对话`
+              : '统一主对话'}
+          </span>
           <select
             value={intent}
             onChange={(e) => setIntent(e.target.value as typeof intent)}
-            style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid var(--line)', borderRadius: 8, padding: '3px 6px', fontSize: 11.5 }}
+            className="tiny-select"
           >
             <option value="chat">普通消息</option>
             <option value="instruction">指令</option>
@@ -146,7 +289,9 @@ export function Conversation({
           placeholder={
             intent === 'supplement' && ['completed', 'blocked', 'failed'].includes(detail.task.lifecycle)
               ? '写清楚要改哪里(例如: 第二节太笼统, 换成带步骤的版本), 然后发送 → 会重新出计划让你批准'
-              : '输入消息… (Ctrl+Enter 发送)'
+              : isLeadTarget
+                ? '输入消息… (Ctrl+Enter 发送, 发给主控)'
+                : `输入消息… (Ctrl+Enter 发送, 只发给 ${current?.displayName ?? '该席位'})`
           }
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {
@@ -155,7 +300,7 @@ export function Conversation({
         />
         <div className="row" style={{ justifyContent: 'flex-end' }}>
           <button className="btn primary" disabled={busy || text.trim().length === 0} onClick={() => void send()}>
-            {busy ? '发送中…' : '发送'}
+            {busy ? '发送中…' : isLeadTarget ? '发送给主控' : `发送给 ${current?.displayName ?? '席位'}`}
           </button>
         </div>
         {err ? <div className="err">{err}</div> : null}

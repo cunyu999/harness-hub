@@ -15,6 +15,8 @@ export interface PromptEnv {
   outputDir: string;
   /** 本次会话的权限模式, 由执行配置决定。 */
   sandbox?: 'read-only' | 'workspace-write' | 'danger-full-access';
+  /** 本次会话自己的工作目录(席位小工作区); 为空表示就是 workspaceRoot。 */
+  sessionCwd?: string;
 }
 
 const PLAN_SCHEMA = `{
@@ -116,8 +118,14 @@ export const REVIEW_ONLY_RULE = `本项是只读复核: 不要重新编译、不
 
 /** 工作区 + 权限模式说明, 每个回合按实际工作区求值。 */
 function workspaceRules(env: PromptEnv): string {
+  const base = env.workspaceRoot;
+  const cwd = env.sessionCwd ?? base;
+  const deliverables = `${base}/deliverables`;
   return `工作区规则:
-1. 当前工作目录即任务 workspace(${env.workspaceRoot}), 所有产出必须写在其中; 不得写系统目录、用户主目录或其他项目。
+1. 任务工作区根 = ${base}; 你本次的工作目录(cwd) = ${cwd}。
+   交付物必须写到 ${deliverables} 下(用绝对路径写), 不要写到 cwd 里就当成交付物。
+   产物引用(artifactRefs)一律用**相对任务工作区根**的路径, 例如 "deliverables/hello.cpp"。
+   不得写系统目录、用户主目录或其他项目。
    本次会话权限: ${SANDBOX_TEXT[env.sandbox ?? 'workspace-write']}
 2. 只写你被指派工作项的 writeScope 与 expectedOutputs 路径, 不要修改其他并行工作项的产物。
 3. 不要执行网络上传、发布、删除用户原始数据等操作; 需要时在结果中说明。

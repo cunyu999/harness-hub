@@ -78,8 +78,18 @@ export const api = {
     request<{ status: string }>('POST', `/api/tasks/${id}/plan`, { reason, supplement }),
   planDecision: (id: string, body: Record<string, unknown>) =>
     request<{ decision: string; task: TaskRecord }>('POST', `/api/tasks/${id}/plan-decisions`, body),
-  sendMessage: (id: string, body: { text: string; intent: string }) =>
+  sendMessage: (id: string, body: { text: string; intent: string; participantId?: string | null }) =>
     request<{ messageId: string }>('POST', `/api/tasks/${id}/messages`, body),
+  updateParticipant: (
+    id: string,
+    participantId: string,
+    body: { workspaceRoot?: string | null; sandbox?: string | null },
+  ) =>
+    request<{ ok: boolean; participant: Record<string, unknown> }>(
+      'PATCH',
+      `/api/tasks/${id}/participants/${participantId}`,
+      body,
+    ),
   control: (id: string, action: string, sessionId?: string, reason?: string) =>
     request<{ status: string }>('POST', `/api/tasks/${id}/controls`, {
       action,

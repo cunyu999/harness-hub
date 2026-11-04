@@ -149,9 +149,19 @@ export type PlanDecisionInput = z.infer<typeof PlanDecisionSchema>;
 export const TaskMessageSchema = z.object({
   text: z.string().min(1).max(20000),
   intent: z.enum(['chat', 'answer', 'supplement', 'instruction']).default('chat'),
+  /** 指定和哪个席位对话(留空 = 主控)。 */
+  participantId: z.string().max(80).nullable().optional(),
   idempotencyKey: z.string().min(1).max(200).optional(),
 });
 export type TaskMessageInput = z.infer<typeof TaskMessageSchema>;
+
+export const ParticipantSettingsSchema = z.object({
+  /** 席位自己的工作目录: 绝对路径, 或相对任务工作区的路径; null 表示回到自动分配。 */
+  workspaceRoot: z.string().max(600).nullable().optional(),
+  /** 席位级权限覆盖; null 表示沿用执行配置。 */
+  sandbox: z.enum(['read-only', 'workspace-write', 'danger-full-access']).nullable().optional(),
+});
+export type ParticipantSettingsInput = z.infer<typeof ParticipantSettingsSchema>;
 
 export const TaskControlSchema = z.object({
   action: z.enum(['pause_dispatch', 'resume', 'cancel', 'cancel_session']),

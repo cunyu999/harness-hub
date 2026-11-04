@@ -18,6 +18,13 @@ export function NewTaskDialog({
   const [constraints, setConstraints] = useState('');
   const [outputHint, setOutputHint] = useState('');
   const [workspace, setWorkspace] = useState('');
+  // 角色默认权限: planner 默认完全权限, worker 默认工作区内可写; 建好任务后仍可在对话栏逐个改
+  const [plannerSandbox, setPlannerSandbox] = useState<'read-only' | 'workspace-write' | 'danger-full-access'>(
+    'danger-full-access',
+  );
+  const [workerSandbox, setWorkerSandbox] = useState<'read-only' | 'workspace-write' | 'danger-full-access'>(
+    'workspace-write',
+  );
   const [strong, setStrong] = useState<string[]>([]);
   const [lead, setLead] = useState<string>('');
   const [workers, setWorkers] = useState<string[]>([]);
@@ -49,6 +56,8 @@ export function NewTaskDialog({
           .filter(Boolean),
         outputHint: outputHint.trim() || undefined,
         workspace: workspace.trim() || null,
+        plannerSandbox,
+        workerSandbox,
         strongProfileIds: strong,
         leadProfileId: lead,
         workerProfileIds: workers,

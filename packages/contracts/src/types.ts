@@ -283,6 +283,10 @@ export interface Participant {
   allowedPhases: TaskPhase[];
   displayName: string;
   createdAt: string;
+  /** 该席位自己的工作目录(绝对路径, 或相对任务工作区); 为空表示按角色自动分配。 */
+  workspaceRoot?: string | null;
+  /** 该席位的会话权限覆盖; 为空表示沿用执行配置的 sandbox。 */
+  sandbox?: SandboxMode | null;
 }
 
 /* ------------------------------------------------------------------ */

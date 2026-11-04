@@ -24,6 +24,8 @@ export function App() {
   });
   const [tab, setTab] = useState<Tab>('plan');
   const [selection, setSelection] = useState<GraphSelection>(null);
+  // 对话对象: null = 主控, 否则是某个席位的 participantId
+  const [chatTarget, setChatTarget] = useState<string | null>(null);
   const [showNew, setShowNew] = useState(false);
   const [showProfiles, setShowProfiles] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -33,6 +35,7 @@ export function App() {
 
   /** 再次点击同一个节点/卡片就收起, 免得只能靠右上角关闭。 */
   const pickSelection = (next: GraphSelection) => {
+    if (next && next.kind === 'participant') setChatTarget(next.id);
     setSelection((prev) => {
       if (!prev || !next) return next;
       if (prev.kind !== next.kind) return next;
@@ -57,6 +60,7 @@ export function App() {
         if (taskId === t.id) {
           setTaskId(null);
           setSelection(null);
+    setChatTarget(null);
           localStorage.removeItem('hh.taskId');
         }
       } catch (e) {
@@ -317,6 +321,10 @@ export function App() {
                 events={state.events}
                 onClose={() => setSelection(null)}
                 onChanged={refresh}
+                onChat={(participantId) => {
+                  setChatTarget(participantId);
+                  setTab('chat');
+                }}
               />
             </aside>
           ) : null}
@@ -335,7 +343,13 @@ export function App() {
               {!detail ? (
                 <div className="empty">尚未选择任务。</div>
               ) : tab === 'chat' ? (
-                <Conversation detail={detail} deltas={state.deltas} onChanged={refresh} />
+                <Conversation
+            detail={detail}
+            deltas={state.deltas}
+            onChanged={refresh}
+            target={chatTarget}
+            onTargetChange={setChatTarget}
+          />
               ) : tab === 'plan' ? (
                 <PlanPanel detail={detail} onChanged={refresh} />
               ) : tab === 'approvals' ? (

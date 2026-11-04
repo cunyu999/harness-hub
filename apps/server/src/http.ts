@@ -19,6 +19,7 @@ import {
   ProbeRequestSchema,
   ProfileCreateSchema,
   ProfilePatchSchema,
+  ParticipantSettingsSchema,
   TaskControlSchema,
   TaskMessageSchema,
   type ArtifactDto,
@@ -116,6 +117,7 @@ export class ApiServer {
     this.add('POST', '/api/tasks/:id/messages', (ctx) => this.postMessage(ctx));
     this.add('POST', '/api/tasks/:id/controls', (ctx) => this.control(ctx));
     this.add('POST', '/api/tasks/:id/work-items/:itemId/retry', (ctx) => this.retryWorkItem(ctx));
+    this.add('PATCH', '/api/tasks/:id/participants/:participantId', (ctx) => this.patchParticipant(ctx));
     this.add('GET', '/api/tasks/:id/artifacts', (ctx) => this.listArtifacts(ctx));
     this.add('GET', '/api/tasks/:id/reviews', (ctx) => this.getReviews(ctx));
 
@@ -577,8 +579,21 @@ export class ApiServer {
 
   private async postMessage(ctx: Ctx) {
     const input = TaskMessageSchema.parse(ctx.body);
-    await this.engine.sendUserMessage(ctx.params.id, { text: input.text, intent: input.intent });
+    await this.engine.sendUserMessage(ctx.params.id, {
+      text: input.text,
+      intent: input.intent,
+      participantId: input.participantId ?? null,
+    });
     return { ok: true, snapshot: this.engine.snapshot(ctx.params.id) };
+  }
+
+  private async patchParticipant(ctx: Ctx) {
+    const input = ParticipantSettingsSchema.parse(ctx.body);
+    const participant = await this.engine.updateParticipantSettings(ctx.params.id, ctx.params.participantId, {
+      workspaceRoot: input.workspaceRoot,
+      sandbox: input.sandbox,
+    });
+    return { ok: true, participant, snapshot: this.engine.snapshot(ctx.params.id) };
   }
 
   private async control(ctx: Ctx) {

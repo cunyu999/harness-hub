@@ -580,8 +580,8 @@ class CodexSession implements AdapterSession {
     const profile = this.opts.profile;
     const params: Record<string, unknown> = {
       cwd: this.opts.cwd,
-      approvalPolicy: profile.configRefs.approvalPolicy ?? sandboxApproval(profile.sandbox),
-      sandbox: profile.configRefs.sandbox ?? profile.sandbox ?? 'workspace-write',
+      approvalPolicy: profile.configRefs.approvalPolicy ?? sandboxApproval(this.opts.sandbox ?? profile.sandbox),
+      sandbox: profile.configRefs.sandbox ?? this.opts.sandbox ?? profile.sandbox ?? 'workspace-write',
       cwdCompat: undefined,
     };
     delete params.cwdCompat;

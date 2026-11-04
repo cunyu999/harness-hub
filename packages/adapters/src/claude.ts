@@ -316,6 +316,11 @@ class ClaudeSession implements AdapterSession {
     this.nativeId = opts.resumeNativeSessionId ?? null;
   }
 
+  /** 会话级权限: 席位/任务可以覆盖执行配置里的 sandbox。 */
+  private sessionSandbox(): 'read-only' | 'workspace-write' | 'danger-full-access' {
+    return this.opts.sandbox ?? this.opts.profile.sandbox ?? 'workspace-write';
+  }
+
   get nativeSessionId(): string | null {
     return this.nativeId;
   }
@@ -376,7 +381,7 @@ class ClaudeSession implements AdapterSession {
         env: this.deps.env,
         abortController: controller,
         includePartialMessages: true,
-        permissionMode: claudePermission(this.opts.profile.sandbox),
+        permissionMode: claudePermission(this.sessionSandbox()),
         settingSources: ['user', 'project'],
         stderr: (data: string) => {
           if (/error/i.test(data) && data.trim().length > 0) {
@@ -384,7 +389,7 @@ class ClaudeSession implements AdapterSession {
           }
         },
         canUseTool: async (toolName: string, input: Record<string, unknown>, extra: Record<string, unknown>) => {
-          const mode = this.opts.profile.sandbox;
+          const mode = this.sessionSandbox();
           // 只读配置: 写类工具直接拒, 不浪费一次人工审批
           if (mode === 'read-only' && WRITE_TOOLS.has(toolName)) {
             return { behavior: 'deny', message: '当前执行配置是只读权限, 不允许修改文件或执行命令' };

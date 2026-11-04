@@ -20,6 +20,7 @@ import {
   type ReviewFinding,
   type ReviewResult,
   type ReviewVerdict,
+  type SandboxMode,
   type RunAttempt,
   type TaskLimits,
   type TaskPhase,
@@ -291,6 +292,57 @@ export class Engine implements AdapterHost {
     return path.join(this.cfg.paths.root, '.local', 'runs', taskId, 'workspace');
   }
 
+  /** 角色大工作区: planner(强模型组) / worker(执行者组)。 */
+  groupDir(base: string, role: 'strong' | 'worker'): string {
+    return path.join(base, role === 'strong' ? 'planner' : 'worker');
+  }
+
+  private slugOf(participant: { displayName: string; id: string }): string {
+    const slug = participant.displayName
+      .toLowerCase()
+      .replace(/[^a-z0-9\u4e00-\u9fa5]+/g, '-')
+      .replace(/^-+|-+$/g, '');
+    return (slug || participant.id).slice(0, 40);
+  }
+
+  /** 自定义目录不存在时: 项目内允许创建, 项目外要求用户先建好(不静默在别人磁盘上造目录)。 */
+  private ensureWorkspaceDir(abs: string): string {
+    if (existsSync(abs)) {
+      if (!statSync(abs).isDirectory()) {
+        throw new EngineError('workspace_not_directory', `工作目录不是目录: ${abs}`, 422);
+      }
+      return abs;
+    }
+    if (!isInside(this.cfg.paths.root, abs)) {
+      throw new EngineError(
+        'workspace_missing',
+        `工作目录不存在: ${abs}。请在磁盘上先创建该目录, 程序不会在项目外自动创建目录。`,
+        422,
+      );
+    }
+    mkdirSync(abs, { recursive: true });
+    return abs;
+  }
+
+  /**
+   * 某个席位实际使用的工作目录(会话 cwd):
+   * 席位自己配置过 workspaceRoot 就用它, 否则按 <任务工作区>/<planner|worker>/<席位名> 自动分配。
+   */
+  participantWorkspace(
+    task: { id: string; workspaceRoot?: string | null },
+    participant: { role: 'strong' | 'worker'; displayName: string; id: string; workspaceRoot?: string | null },
+  ): string {
+    const base = this.workspaceOf(task);
+    const custom = participant.workspaceRoot?.trim();
+    if (custom) {
+      const abs = path.isAbsolute(custom) ? path.resolve(custom) : path.resolve(base, custom);
+      return this.ensureWorkspaceDir(abs);
+    }
+    const dir = path.join(this.groupDir(base, participant.role), this.slugOf(participant));
+    mkdirSync(dir, { recursive: true });
+    return dir;
+  }
+
   taskTmpDir(taskId: string): string {
     return path.join(this.cfg.paths.root, '.local', 'runs', taskId, 'tmp');
   }
@@ -399,6 +451,10 @@ export class Engine implements AdapterHost {
     outputHint?: string;
     /** 用户指定的工作区(绝对或相对项目根); 留空用任务私有目录。 */
     workspace?: string | null;
+    /** 强模型(planner)席位的默认权限; 留空用 danger-full-access。 */
+    plannerSandbox?: SandboxMode | null;
+    /** 执行者(worker)席位的默认权限; 留空用 workspace-write。 */
+    workerSandbox?: SandboxMode | null;
   }): TaskRecord {
     const strongIds = unique(input.strongProfileIds);
     if (strongIds.length === 0) throw new EngineError('invalid_participants', '至少需要一个强模型配置');
@@ -461,6 +517,12 @@ export class Engine implements AdapterHost {
           isLead,
           allowedPhases: PHASE_ORDER,
           displayName: profile.name,
+          // planner(强模型)默认完全权限, worker(执行者)默认只能改工作区; 都可在任务里再改
+          sandbox:
+            role === 'strong'
+              ? (input.plannerSandbox ?? 'danger-full-access')
+              : (input.workerSandbox ?? 'workspace-write'),
+          workspaceRoot: null,
           createdAt: now,
         };
         this.repo.insertParticipant(participant);
@@ -475,6 +537,12 @@ export class Engine implements AdapterHost {
 
     const workspace = this.prepareWorkspace(task.workspaceRoot, taskId);
     mkdirSync(path.join(workspace, 'deliverables'), { recursive: true });
+    mkdirSync(this.groupDir(workspace, 'strong'), { recursive: true });
+    mkdirSync(this.groupDir(workspace, 'worker'), { recursive: true });
+    // 每个席位先在角色大工作区里建好自己的小工作区, 之后会话 cwd 就是它
+    for (const participant of this.repo.listParticipants(taskId)) {
+      this.participantWorkspace(task, participant);
+    }
     this.emit('task.updated', { taskId, payload: { created: true, phase: task.phase, lifecycle: task.lifecycle } });
     return this.repo.getTask(taskId)!;
   }
@@ -531,13 +599,18 @@ export class Engine implements AdapterHost {
     return profile?.sandbox ?? 'workspace-write';
   }
 
-  private promptEnv(task: TaskRecord, sandbox: 'read-only' | 'workspace-write' | 'danger-full-access' = 'workspace-write'): PromptEnv {
+  private promptEnv(
+    task: TaskRecord,
+    sandbox: 'read-only' | 'workspace-write' | 'danger-full-access' = 'workspace-write',
+    participant?: { role: 'strong' | 'worker'; displayName: string; id: string; workspaceRoot?: string | null },
+  ): PromptEnv {
     return {
       task,
       participants: this.participantsOf(task.id),
       limits: task.limits,
       workspaceRoot: this.workspaceOf(task),
       sandbox,
+      sessionCwd: participant ? this.participantWorkspace(task, participant) : undefined,
       outputDir: 'deliverables',
     };
   }
@@ -559,6 +632,7 @@ export class Engine implements AdapterHost {
     const adapter = this.adapterFor(profile);
     const workspace = this.workspaceOf(task);
     mkdirSync(workspace, { recursive: true });
+    const sessionCwd = this.participantWorkspace(task, participant);
     const attemptId = newId('att');
     const sessionRowId = newId('ses');
     const now = nowIso();
@@ -622,11 +696,18 @@ export class Engine implements AdapterHost {
           taskId: task.id,
           attemptId,
           participantId: participant.id,
-          cwd: workspace,
+          cwd: sessionCwd,
           purpose: opts.purpose ?? kind,
-          env: { ...profile.env, ...this.taskSessionEnv(task.id, { HH_PARTICIPANT: participant.id }) },
-          writeScope: [workspace],
-          sandbox: profile.sandbox,
+          env: {
+            ...profile.env,
+            ...this.taskSessionEnv(task.id, {
+              HH_PARTICIPANT: participant.id,
+              HH_WORKSPACE: workspace,
+              HH_DELIVERABLES: path.join(workspace, 'deliverables'),
+            }),
+          },
+          writeScope: [sessionCwd, path.join(workspace, 'deliverables')],
+          sandbox: participant.sandbox ?? profile.sandbox,
           resumeNativeSessionId: this.reusableNativeSession(task.id, participant.id, phase),
         },
         this,
@@ -1477,7 +1558,7 @@ export class Engine implements AdapterHost {
 
     let participant = item.assignedParticipantId ? this.repo.getParticipant(item.assignedParticipantId) : null;
     if (!participant || participant.taskId !== taskId) participant = this.leadOf(taskId);
-    const env = this.promptEnv(task, this.sandboxForTask(task.id));
+    const env = this.promptEnv(task, participant.sandbox ?? this.sandboxOf(participant), participant);
     const planItem = {
       id: item.planItemId,
       goal: item.goal,
@@ -2191,7 +2272,10 @@ export class Engine implements AdapterHost {
   /* 用户消息与控制                                                      */
   /* ------------------------------------------------------------------ */
 
-  async sendUserMessage(taskId: string, input: { text: string; intent: string }): Promise<void> {
+  async sendUserMessage(
+    taskId: string,
+    input: { text: string; intent: string; participantId?: string | null },
+  ): Promise<void> {
     const task = this.requireTask(taskId);
     this.repo.insertMessage({
       id: newId('msg'),
@@ -2205,6 +2289,19 @@ export class Engine implements AdapterHost {
       createdAt: nowIso(),
       incomplete: false,
     });
+    // 用户点名了某个席位: 这一轮就是和它对话(主控以外的席位不会触发重新计划)
+    if (input.participantId) {
+      const target = this.repo.getParticipant(input.participantId);
+      if (!target || target.taskId !== taskId) {
+        throw new EngineError('participant_not_found', '这个席位不属于该任务', 404);
+      }
+      const lead = this.participantsOf(taskId).find((p) => p.isLead);
+      if (!lead || lead.id !== target.id) {
+        void this.chatWith(taskId, target.id, input.text);
+        return;
+      }
+    }
+
     // 任务已经交付(或被阻塞/失败)后, 用户提出修改要求: 这是"再来一轮"，
     // 不是闲聊 —— 重新出计划、重新批准、再走 执行 → 审核 → 交付。
     if (
@@ -2293,6 +2390,84 @@ export class Engine implements AdapterHost {
         // runTurn 已通过事件记录 message.completed
       }
     });
+  }
+
+
+  /** 和指定席位单独对话: 不推进任务状态机, 只跑一个 chat 回合并记录消息。 */
+  async chatWith(taskId: string, participantId: string, text: string): Promise<void> {
+    const task = this.requireTask(taskId);
+    const participant = this.repo.getParticipant(participantId);
+    if (!participant || participant.taskId !== taskId) {
+      throw new EngineError('participant_not_found', '这个席位不属于该任务', 404);
+    }
+    if (this.live.has(taskId)) {
+      // 同一任务同一时刻只跑一个对话回合, 避免把会话状态搅在一起
+      const busy = Array.from(this.live.values()).some((l) => l.taskId === taskId);
+      if (busy) throw new EngineError('session_busy', '这个任务还有会话在跑, 请稍后再试', 409);
+    }
+    const env = this.promptEnv(task, participant.sandbox ?? this.sandboxOf(participant), participant);
+    const cwd = this.participantWorkspace(task, participant);
+    const prompt = {
+      text: `### HARNESS-HUB TURN v1\nkind: chat\ntask: ${taskId}\nwork_item: -\nexpects_json: false\n\n### CONTEXT (JSON)\n${JSON.stringify(
+        {
+          task: { id: task.id, title: task.title, objective: task.objective, phase: task.phase },
+          workspace: env.workspaceRoot,
+          sessionCwd: cwd,
+          deliverablesDir: path.join(env.workspaceRoot, 'deliverables'),
+          role: participant.role,
+          userMessage: text,
+        },
+        null,
+        2,
+      )}\n\n### INSTRUCTION\n用户正在和你(${participant.displayName})单独对话, 请在当前任务范围内回应。\n只输出自然语言回复; 除非用户明确要求, 不要修改工作区文件。`,
+      context: { userMessage: text, sessionCwd: cwd },
+    };
+    await this.runStage(taskId, `chat:${participant.id}`, async () => {
+      await this.runTurn(task, participant, task.phase, 'chat', prompt, {
+        purpose: `chat:${participant.displayName}`,
+        expectsJson: false,
+      });
+    });
+  }
+
+  /** 修改某个席位的工作目录与权限(下一回合生效)。 */
+  async updateParticipantSettings(
+    taskId: string,
+    participantId: string,
+    patch: { workspaceRoot?: string | null; sandbox?: 'read-only' | 'workspace-write' | 'danger-full-access' | null },
+  ): Promise<Participant> {
+    const task = this.requireTask(taskId);
+    const participant = this.repo.getParticipant(participantId);
+    if (!participant || participant.taskId !== taskId) {
+      throw new EngineError('participant_not_found', '这个席位不属于该任务', 404);
+    }
+    let workspaceRoot: string | null | undefined;
+    if (patch.workspaceRoot !== undefined) {
+      const text = patch.workspaceRoot?.trim() ?? '';
+      if (!text) {
+        workspaceRoot = null;
+      } else {
+        const base = this.workspaceOf(task);
+        workspaceRoot = path.isAbsolute(text) ? path.resolve(text) : path.resolve(base, text);
+      }
+    }
+    const updated = this.repo.updateParticipant(participantId, {
+      workspaceRoot,
+      sandbox: patch.sandbox === undefined ? undefined : patch.sandbox,
+    });
+    if (!updated) throw new EngineError('participant_not_found', '这个席位不属于该任务', 404);
+    // 目录不存在时按规则处理(项目内自动建, 项目外要求先手工建)
+    const dir = this.participantWorkspace(task, updated);
+    this.emit('task.updated', {
+      taskId,
+      payload: {
+        participantId,
+        workspaceRoot: updated.workspaceRoot ?? null,
+        resolvedWorkspace: dir,
+        sandbox: updated.sandbox ?? null,
+      },
+    });
+    return updated;
   }
 
   /** 只重跑某一个工作项: 不产生新计划版本, 也不动已接受的其他项。 */
