@@ -2,84 +2,66 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { TaskDetail } from '../api';
 import type { EventEnvelope } from '../../../../packages/contracts/src/events';
 import type { ManagedSession, Participant, RunAttempt, TaskPhase, WorkItem } from '../../../../packages/contracts/src/types';
-import { ACTIVITY_LABEL, ITEM_LABEL, PHASE_LABEL, duration, initials, shortId } from '../lib/format';
+import { ITEM_LABEL, PHASE_LABEL, duration, initials } from '../lib/format';
 
 export type GraphSelection = { kind: 'participant'; id: string } | { kind: 'artifact'; id: string } | null;
 
 type Tone = 'run' | 'wait' | 'ok' | 'bad' | 'idle';
+type ItemState = keyof typeof ITEM_LABEL;
 
-interface AgentView {
-  key: string;
-  participant: Participant;
-  roleLabel: string;
-  harness: string;
-  model: string;
-  tone: Tone;
-  stateLabel: string;
-  doing: string;
-  item: WorkItem | null;
-  queue: WorkItem[];
-  session: ManagedSession | null;
-  attempt: RunAttempt | null;
-  elapsedMs: number | null;
-  badge?: string;
-}
+/** 每个席位一个色相, 同时用于卡片左侧色条与它的连线; 状态色另行表达, 两者不混用。 */
+const ACCENTS = ['#8b7bff', '#2fb8a6', '#d99435', '#5b8def', '#d4709d', '#4aa96c'];
+const ACCENT_SOFT = [
+  'rgba(139, 123, 255, .13)',
+  'rgba(47, 184, 166, .13)',
+  'rgba(217, 148, 53, .13)',
+  'rgba(91, 141, 239, .13)',
+  'rgba(212, 112, 157, .13)',
+  'rgba(74, 169, 108, .13)',
+];
 
-interface PlacedAgent {
-  view: AgentView;
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-}
-
-interface Chip {
-  key: string;
-  label: string;
-  state: string;
-  item: WorkItem;
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-  active: boolean;
-}
-
-interface Lane {
-  workerKey: string;
-  y: number;
-  h: number;
-  chips: Chip[];
-  endX: number;
-  endY: number;
-}
-
-interface Link {
-  key: string;
-  d: string;
-  tone: Tone;
-  active: boolean;
-  label?: string;
-  labelX?: number;
-  labelY?: number;
-}
-
-const PAD = 30;
-const LEAD_W = 348;
-const LEAD_H = 118;
-const STRONG_W = 276;
-const STRONG_H = 104;
-const WORKER_W = 258;
-const WORKER_H = 100;
-const CHIP_W = 188;
-const CHIP_H = 50;
-const CHIP_GAP = 34;
-const DELIVER_W = 336;
-const DELIVER_H = 104;
+const HARNESS_SHORT: Record<string, string> = {
+  codex: 'Codex',
+  'claude-code': 'Claude',
+  dsh: 'DSH',
+  mock: 'Mock',
+};
 
 const PHASE_STEPS: TaskPhase[] = ['planning', 'discussion', 'execution', 'integration', 'verification', 'review', 'delivery'];
 
-/** 有活动时每 900ms 刷新一次, 让耗时自然增长; 无活动时不启动定时器。 */
+const PAD = 28;
+const GAP = 22;
+const ROOT_W = 392;
+const ROOT_H = 128;
+const CARD_MIN = 178;
+const CARD_MAX = 268;
+const CARD_BASE = 122;
+const WORK_LINE = 23;
+const MAX_WORKS = 4;
+const GUTTER_TOP = 78;
+const GUTTER_BOTTOM = 88;
+
+interface Seat {
+  key: string;
+  participant: Participant;
+  name: string;
+  roleLabel: string;
+  harness: string;
+  model: string;
+  accent: string;
+  accentSoft: string;
+  tone: Tone;
+  stateLabel: string;
+  doing: string;
+  elapsedMs: number | null;
+  works: WorkItem[];
+  item: WorkItem | null;
+  session: ManagedSession | null;
+  attempt: RunAttempt | null;
+  root: boolean;
+}
+
+/** 有活动时每 900ms 刷新一次, 让耗时自然增长; 无活动不启动定时器。 */
 function useNow(active: boolean): number {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -102,7 +84,7 @@ export function CollabGraph({
   onSelect: (s: GraphSelection) => void;
 }) {
   const wrapRef = useRef<HTMLDivElement | null>(null);
-  const [width, setWidth] = useState(960);
+  const [width, setWidth] = useState(920);
 
   useEffect(() => {
     const el = wrapRef.current;
@@ -115,234 +97,229 @@ export function CollabGraph({
     return () => ro.disconnect();
   }, []);
 
-  const agents = useMemo(() => buildAgents(detail, events), [detail, events]);
-  const layout = useMemo(() => buildLayout(detail, agents, width), [detail, agents, width]);
-  const running = agents.some((a) => a.tone === 'run');
+  const seats = useMemo(() => buildSeats(detail, events), [detail, events]);
+  const plan = useMemo(() => buildPlan(detail, seats, width), [detail, seats, width]);
+  const running = seats.some((s) => s.tone === 'run');
   const now = useNow(running);
-  const reviewing = detail.workItems.filter((w) => w.state === 'awaiting_review' || w.state === 'verifying').length;
-  const accepted = detail.workItems.filter((w) => w.state === 'accepted').length;
 
-  const maxY = Math.max(
-    ...layout.placed.map((p) => p.y + p.h),
-    ...layout.lanes.map((l) => l.y + l.h),
-    layout.deliver ? layout.deliver.y + layout.deliver.h : 0,
-    240,
-  );
-  const height = maxY + PAD + 34;
+  const counts = {
+    run: seats.filter((s) => s.tone === 'run').length,
+    queue: detail.workItems.filter((w) => ['pending', 'ready', 'queued'].includes(w.state)).length,
+    review: detail.workItems.filter((w) => ['awaiting_review', 'verifying'].includes(w.state)).length,
+    accepted: detail.workItems.filter((w) => w.state === 'accepted').length,
+    total: detail.workItems.length,
+  };
 
   return (
-    <div className="cv" ref={wrapRef}>
-      <div className="cv-head">
+    <div className="cx" ref={wrapRef}>
+      <div className="cx-head">
         <PhaseStepper phase={detail.task.phase} lifecycle={detail.task.lifecycle} />
-        <div className="cv-summary">
+        <div className="cx-summary">
           {detail.task.lifecycle === 'awaiting_plan_approval' && detail.plan ? (
-            <span className="cv-pill wait">
-              <span className="cv-dot" />计划 v{detail.plan.number} 待确认
+            <span className="cx-pill wait">
+              <span className="cx-dot" />
+              计划 v{detail.plan.number} 待确认
             </span>
           ) : null}
-          <span className={`cv-pill ${running ? 'live' : ''}`}>
-            <span className="cv-pulse" />
+          <span className={`cx-pill ${running ? 'live' : ''}`}>
+            <span className="cx-dot" />
             {running ? '会话进行中' : '当前无运行会话'}
           </span>
-          <span className="cv-stat">
-            <b>{agents.filter((a) => a.tone === 'run').length}</b> 运行
+          <span className="cx-stat">
+            <b>{counts.run}</b> 运行
           </span>
-          <span className="cv-stat">
-            <b>
-              {
-                detail.workItems.filter((w) => w.state === 'pending' || w.state === 'ready' || w.state === 'queued').length
-              }
-            </b>{' '}
-            排队
+          <span className="cx-stat">
+            <b>{counts.queue}</b> 排队
           </span>
-          {reviewing > 0 ? (
-            <span className="cv-stat">
-              <b>{reviewing}</b> 待审核
+          {counts.review > 0 ? (
+            <span className="cx-stat">
+              <b>{counts.review}</b> 待审核
             </span>
           ) : null}
-          <span className="cv-stat">
-            <b>{accepted}</b>/{detail.workItems.length} 已接受
-          </span>
+          {counts.total > 0 ? (
+            <span className="cx-stat">
+              <b>{counts.accepted}</b>/{counts.total} 已接受
+            </span>
+          ) : null}
         </div>
       </div>
 
-      <div className="cv-canvas" style={{ height }}>
-        {layout.lanes.map((lane, i) => (
-          <div
-            key={`band-${lane.workerKey}`}
-            className="cv-lane"
-            style={{ top: lane.y - 12, height: lane.h + 24 }}
-            aria-hidden="true"
-          >
-            <span className="cv-lane-label">
-              泳道 {i + 1}
-              {lane.chips.length > 0 ? ` · ${lane.chips.length} 项` : ''}
-            </span>
-          </div>
-        ))}
+      <div className="cx-scroll">
+        <div className="cx-plane" style={{ width: plan.w, height: plan.h }}>
+          <svg className="cx-links" width={plan.w} height={plan.h} viewBox={`0 0 ${plan.w} ${plan.h}`} aria-hidden="true">
+            <defs>
+              {ACCENTS.map((c, i) => (
+                <marker key={i} id={`cx-arrow-${i}`} viewBox="0 0 8 8" refX="6.4" refY="4" markerWidth="5" markerHeight="5" orient="auto">
+                  <path d="M 0 0.7 L 6.6 4 L 0 7.3 z" fill={c} opacity="0.7" />
+                </marker>
+              ))}
+            </defs>
+            {plan.links.map((l) => (
+              <g key={l.key}>
+                <path
+                  d={l.d}
+                  className={`cx-link ${l.active ? 'active' : ''}`}
+                  style={{ stroke: l.color }}
+                  markerEnd={l.arrow ? `url(#cx-arrow-${l.index % ACCENTS.length})` : undefined}
+                />
+                {l.active ? (
+                  <circle className="cx-packet" r="2.6" style={{ fill: l.color }}>
+                    <animateMotion dur="2.2s" repeatCount="indefinite" path={l.d} />
+                  </circle>
+                ) : null}
+              </g>
+            ))}
+          </svg>
 
-        <svg className="cv-links" width="100%" height={height} viewBox={`0 0 ${width} ${height}`} aria-hidden="true">
-          <defs>
-            <linearGradient id="cv-flow" x1="0" y1="0" x2="1" y2="1">
-              <stop offset="0%" stopColor="var(--accent)" />
-              <stop offset="55%" stopColor="var(--accent-2)" />
-              <stop offset="100%" stopColor="var(--accent)" />
-            </linearGradient>
-          </defs>
-          {layout.links.map((l) => (
-            <g key={l.key}>
-              <path d={l.d} className={`cv-link ${l.tone} ${l.active ? 'active' : ''}`} id={l.key} />
-              {l.active ? (
-                <circle className="cv-packet" r="2.6">
-                  <animateMotion dur="2.6s" repeatCount="indefinite" path={l.d} />
-                </circle>
-              ) : null}
-              {l.label ? (
-                <text className="cv-link-label" x={l.labelX} y={l.labelY} textAnchor="middle">
-                  {l.label}
-                </text>
-              ) : null}
-            </g>
+          {plan.columns.map((col) => (
+            <div key={col.key} className="cx-col" style={{ left: col.x, width: col.w }} aria-label={col.title}>
+              <div className="cx-col-head">
+                <span className="cx-col-title">{col.title}</span>
+                <span className="cx-col-count">{col.count}</span>
+              </div>
+              <div className="cx-col-body">
+                {col.cards.map((c) =>
+                  c.seat ? (
+                    <SeatCard
+                      key={c.key}
+                      seat={c.seat}
+                      height={c.h}
+                      now={now}
+                      selected={selection?.kind === 'participant' && selection.id === (c.seat as Seat).participant.id}
+                      onSelect={() => onSelect({ kind: 'participant', id: (c.seat as Seat).participant.id })}
+                    />
+                  ) : (
+                    <div key={c.key} className={`cx-card plain ${c.tone ?? ''}`} style={{ height: c.h }}>
+                      <span className="cx-card-rail" style={{ background: c.accent ?? 'var(--line-3)' }} />
+                      <span className="cx-card-top">
+                        <span className="cx-avatar" style={{ background: c.accentSoft ?? 'var(--surface-2)', color: c.accent ?? 'var(--text-2)' }}>
+                          {c.glyph}
+                        </span>
+                        <span className="cx-card-id">
+                          <b>{c.title}</b>
+                          <em title={c.sub}>{c.sub}</em>
+                        </span>
+                        {c.tone ? (
+                          <span className={`cx-state ${c.tone}`}>
+                            <span className={`cx-dot ${c.tone}`} />
+                            {c.tag}
+                          </span>
+                        ) : null}
+                      </span>
+                      {c.meta ? <span className="cx-card-meta">{c.meta}</span> : null}
+                    </div>
+                  ),
+                )}
+              </div>
+            </div>
           ))}
-        </svg>
-
-        {layout.placed.map(({ view, x, y, w, h }) => (
-          <AgentCard
-            key={view.key}
-            view={view}
-            x={x}
-            y={y}
-            w={w}
-            h={h}
-            now={now}
-            selected={selection?.kind === 'participant' && selection.id === view.participant.id}
-            onSelect={() => onSelect({ kind: 'participant', id: view.participant.id })}
-          />
-        ))}
-
-        {layout.lanes.map((lane) =>
-          lane.chips.map((chip) => (
-            <button
-              key={chip.key}
-              type="button"
-              className={`cv-chip ${chip.state} ${chip.active ? 'active' : ''}`}
-              style={{ left: chip.x, top: chip.y, width: chip.w, height: chip.h }}
-              onClick={() => onSelect({ kind: 'participant', id: lane.workerKey.replace(/^p:/, '') })}
-              title={`${chip.label} · ${ITEM_LABEL[chip.item.state as keyof typeof ITEM_LABEL] ?? chip.item.state}`}
-            >
-              <span className="cv-chip-goal">{chip.label}</span>
-              <span className="cv-chip-meta">
-                {ITEM_LABEL[chip.item.state as keyof typeof ITEM_LABEL] ?? chip.item.state}
-                {chip.item.attemptCount > 1 ? ` · 第 ${chip.item.attemptCount} 次` : ''}
-              </span>
-            </button>
-          )),
-        )}
-
-        {layout.deliver ? (
-          <button
-            type="button"
-            className={`cv-agent deliver ${layout.deliver.tone}`}
-            style={{ left: layout.deliver.x, top: layout.deliver.y, width: layout.deliver.w, height: layout.deliver.h }}
-            onClick={() => onSelect({ kind: 'artifact', id: 'artifacts' })}
-            aria-label="查看交付物"
-          >
-            <span className="cv-agent-top">
-              <span className="cv-avatar deliver">◆</span>
-              <span className="cv-agent-id">
-                <b>交付物</b>
-                <em>{layout.deliver.sub}</em>
-              </span>
-              <span className="cv-badge ok">产物</span>
-            </span>
-            <span className="cv-agent-doing">{layout.deliver.doing}</span>
-          </button>
-        ) : null}
+        </div>
       </div>
 
-      <div className="cv-legend">
-        <span className="cv-key run">运行中</span>
-        <span className="cv-key wait">等待</span>
-        <span className="cv-key ok">已完成</span>
-        <span className="cv-key bad">失败</span>
-        <span className="cv-key idle">未开始</span>
-        <span className="cv-note">节点、连线与动效均由服务端事件与会话状态推导, 无模拟动画</span>
+      <div className="cx-legend">
+        {(['run', 'wait', 'ok', 'bad', 'idle'] as Tone[]).map((t) => (
+          <span key={t} className="cx-key">
+            <span className={`cx-dot ${t}`} />
+            {t === 'run' ? '运行中' : t === 'wait' ? '等待' : t === 'ok' ? '已完成' : t === 'bad' ? '失败' : '未开始'}
+          </span>
+        ))}
+        <span className="cx-note">节点、连线与动效均由服务端事件与会话状态推导, 无模拟动画</span>
       </div>
     </div>
   );
 }
 
-/** 阶段步进: 当前阶段高亮, 已过阶段打勾, 停止/失败时整体降级。 */
+/* ------------------------------ 阶段步进 ------------------------------ */
+
 export function PhaseStepper({ phase, lifecycle }: { phase: TaskPhase; lifecycle: string }) {
   const idx = PHASE_STEPS.indexOf(phase);
-  const stopped = lifecycle !== 'active' && lifecycle !== 'awaiting_plan_approval';
   return (
-    <ol className={`cv-steps ${stopped ? 'muted-step' : ''}`} aria-label="任务阶段">
-      {PHASE_STEPS.map((p, i) => (
-        <li key={p} className={i < idx ? 'done' : i === idx ? 'now' : ''}>
-          <span className="cv-step-dot">{i < idx ? '✓' : ''}</span>
-          <span className="cv-step-label">{PHASE_LABEL[p]}</span>
-        </li>
-      ))}
+    <ol className="cx-steps" aria-label="任务阶段">
+      {PHASE_STEPS.map((step, i) => {
+        const done = idx > i;
+        const now = idx === i;
+        return (
+          <li key={step} className={`${done ? 'done' : ''} ${now ? 'now' : ''}`}>
+            <span className="cx-step-dot">{done ? '✓' : ''}</span>
+            <span className="cx-step-label">{PHASE_LABEL[step] ?? step}</span>
+          </li>
+        );
+      })}
+      {lifecycle === 'paused' ? <li className="cx-step-hold">已暂停</li> : null}
     </ol>
   );
 }
 
-function AgentCard({
-  view,
-  x,
-  y,
-  w,
-  h,
+/* ------------------------------ 卡片 ------------------------------ */
+
+function SeatCard({
+  seat,
+  height,
   now,
   selected,
   onSelect,
 }: {
-  view: AgentView;
-  x: number;
-  y: number;
-  w: number;
-  h: number;
+  seat: Seat;
+  height: number;
   now: number;
   selected: boolean;
   onSelect: () => void;
 }) {
-  const elapsed = view.elapsedMs === null ? null : duration(view.elapsedMs);
+  const elapsed = seat.elapsedMs === null ? null : duration(seat.elapsedMs);
+  const works = seat.works.slice(0, MAX_WORKS);
+  const more = seat.works.length - works.length;
+
   return (
     <button
       type="button"
-      className={`cv-agent ${view.tone} ${selected ? 'selected' : ''} ${view.badge ? 'lead' : ''}`}
-      style={{ left: x, top: y, width: w, height: h }}
+      className={`cx-card ${seat.tone} ${seat.root ? 'root' : ''} ${selected ? 'selected' : ''}`}
+      style={{ height }}
       onClick={onSelect}
-      aria-label={`${view.participant.displayName} ${view.roleLabel} ${view.stateLabel} ${view.doing}`}
       aria-pressed={selected}
+      aria-label={`${seat.name} ${seat.roleLabel} ${seat.stateLabel} ${seat.doing}`}
     >
-      <span className="cv-rail" />
-      <span className="cv-agent-top">
-        <span className={`cv-avatar ${view.tone}`}>{initials(view.participant.displayName)}</span>
-        <span className="cv-agent-id">
-          <b>{view.participant.displayName}</b>
-          <em title={`${view.roleLabel} · ${view.harness}${view.model ? ` · ${view.model}` : ''}`}>
-            {view.badge ? '' : `${view.roleLabel} · `}
-            {harnessShort(view.harness)}
-            {view.model ? ` · ${view.model}` : ''}
+      <span className="cx-card-rail" style={{ background: seat.accent }} />
+      <span className="cx-card-top">
+        <span className="cx-avatar" style={{ background: seat.accentSoft, color: seat.accent }}>
+          {initials(seat.name)}
+        </span>
+        <span className="cx-card-id">
+          <b>{seat.name}</b>
+          <em title={`${seat.roleLabel} · ${seat.harness}${seat.model ? ` · ${seat.model}` : ''}`}>
+            {seat.roleLabel} · {HARNESS_SHORT[seat.harness] ?? seat.harness}
+            {seat.model ? ` · ${seat.model}` : ''}
           </em>
         </span>
-        {view.badge ? <span className="cv-badge">{view.badge}</span> : null}
-        <span className={`cv-state ${view.tone}`}>
-          <span className="cv-dot" />
-          {view.stateLabel}
+        <span className={`cx-state ${seat.tone}`}>
+          <span className={`cx-dot ${seat.tone}`} />
+          {seat.stateLabel}
         </span>
       </span>
-      <span className="cv-agent-doing" title={view.doing}>
-        {view.doing}
+
+      <span className="cx-card-doing" title={seat.doing}>
+        {seat.doing}
       </span>
-      <span className="cv-agent-foot">
-        <span className="cv-stage">{view.item ? ITEM_LABEL[view.item.state as keyof typeof ITEM_LABEL] ?? view.item.state : '—'}</span>
-        <span className="cv-elapsed" title={view.elapsedMs === null ? '暂无运行中的尝试' : '本次尝试耗时(自然增长)'}>
-          {elapsed && elapsed !== '—' ? `${elapsed}` : `空闲 ${view.session ? '· ' + shortAgo(view.session.lastEventAt, now) : ''}`}
+
+      <span className="cx-card-meta">
+        {seat.item ? `${ITEM_LABEL[seat.item.state as ItemState] ?? seat.item.state}` : '暂无工作项'}
+        <span className="cx-sep">·</span>
+        {elapsed && elapsed !== '—' ? `已用 ${elapsed}` : seat.session ? `空闲 · ${shortAgo(seat.session.lastEventAt, now)}` : '未启动会话'}
+      </span>
+
+      {works.length > 0 ? (
+        <span className="cx-works">
+          {works.map((w) => (
+            <span className="cx-work" key={w.id}>
+              <span className={`cx-work-dot ${w.state}`} />
+              <span className="cx-work-goal" title={w.goal}>
+                {w.goal}
+              </span>
+              <span className={`cx-work-state ${w.state}`}>{ITEM_LABEL[w.state as ItemState] ?? w.state}</span>
+            </span>
+          ))}
+          {more > 0 ? <span className="cx-work-more">还有 {more} 项</span> : null}
         </span>
-      </span>
+      ) : null}
     </button>
   );
 }
@@ -356,45 +333,245 @@ function shortAgo(iso: string, now: number): string {
   return `${Math.round(s / 3600)}h 前`;
 }
 
+/* ------------------------------ 布局 ------------------------------ */
+
+interface CardModel {
+  key: string;
+  seat: Seat | null;
+  h: number;
+  title?: string;
+  sub?: string;
+  meta?: string;
+  glyph?: string;
+  tone?: Tone;
+  tag?: string;
+  accent?: string;
+  accentSoft?: string;
+}
+
+interface Column {
+  key: string;
+  title: string;
+  count: number;
+  x: number;
+  w: number;
+  cards: CardModel[];
+}
+
+interface LinkPath {
+  key: string;
+  d: string;
+  color: string;
+  index: number;
+  active: boolean;
+  arrow: boolean;
+}
+
+interface Plan {
+  w: number;
+  h: number;
+  columns: Column[];
+  links: LinkPath[];
+}
+
+interface Box {
+  key: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/**
+ * 并列列布局(参考 Lancer 的编排画布):
+ * 主控/规划 → 执行者 → 审核席位 → 交付物 各占一列, 列内卡片自上而下堆叠,
+ * 连线只在列间的竖直空隙(gutter)里走, 因此天然不会压到任何卡片。
+ */
+function buildPlan(detail: TaskDetail, seats: Seat[], width: number): Plan {
+  const lead = seats.find((s) => s.root) ?? null;
+  const workers = seats.filter((s) => !s.root && s.participant.role === 'worker');
+  const strongs = seats.filter((s) => !s.root && s.participant.role === 'strong');
+  const done = detail.task.lifecycle === 'completed';
+  const hasDeliver = detail.artifacts.length > 0 || detail.reviewRounds.length > 0 || done || detail.task.phase === 'delivery';
+
+  const raw: { key: string; title: string; cards: CardModel[] }[] = [];
+
+  if (lead) {
+    const cards: CardModel[] = [{ key: `seat-${lead.key}`, seat: lead, h: 132 }];
+    if (detail.plan) {
+      const planLive = detail.task.lifecycle === 'awaiting_plan_approval' ? 'wait' : detail.plan.status === 'approved' ? 'ok' : 'idle';
+      cards.push({
+        key: 'plan-card',
+        seat: null,
+        h: 96,
+        title: `计划 v${detail.plan.number}`,
+        sub: `${detail.plan.content.workItems.length} 个工作项 · ${detail.plan.content.deliverables.length} 份交付物`,
+        meta: `哈希 ${detail.plan.contentHash.slice(0, 10)} · ${planLive === 'wait' ? '待你确认' : planLive === 'ok' ? '已批准' : detail.plan.status}`,
+        glyph: '计',
+        tone: planLive as Tone,
+        tag: planLive === 'wait' ? '待确认' : planLive === 'ok' ? '已批准' : '草稿',
+        accent: 'var(--accent)',
+        accentSoft: 'var(--accent-soft)',
+      });
+    }
+    raw.push({ key: 'plan', title: '主控 / 规划', cards });
+  }
+
+  if (workers.length > 0) {
+    raw.push({
+      key: 'exec',
+      title: '执行者',
+      cards: workers.map((w) => ({ key: `seat-${w.key}`, seat: w, h: workerCardHeight(w) })),
+    });
+  }
+
+  if (strongs.length > 0) {
+    raw.push({
+      key: 'review',
+      title: '审核席位',
+      cards: strongs.map((s) => ({ key: `seat-${s.key}`, seat: s, h: 132 })),
+    });
+  }
+
+  if (hasDeliver) {
+    raw.push({
+      key: 'deliver',
+      title: '交付',
+      cards: [
+        {
+          key: 'deliver-card',
+          seat: null,
+          h: 104,
+          title: '交付物',
+          sub: `${detail.artifacts.length} 个登记文件 · ${detail.reviewRounds.length} 轮审核`,
+          meta: `工作项 ${detail.workItems.filter((w) => w.state === 'accepted').length}/${detail.workItems.length} 已接受 · 交付说明见「产物」页签`,
+          glyph: '物',
+          tone: done ? 'ok' : 'wait',
+          tag: done ? '已交付' : '收集中',
+          accent: 'var(--ok)',
+          accentSoft: 'var(--ok-soft)',
+        },
+      ],
+    });
+  }
+
+  const n = Math.max(1, raw.length);
+  const gutter = n >= 4 ? 48 : n > 2 ? 60 : 78;
+  const available = width - PAD * 2 - gutter * (n - 1);
+  const colW = Math.max(168, Math.min(300, Math.floor(available / n)));
+  const spanW = n * colW + (n - 1) * gutter;
+  const planeW = Math.max(width, spanW + PAD * 2);
+  const left = Math.round((planeW - spanW) / 2);
+
+  const columns: Column[] = raw.map((c, i) => ({
+    key: c.key,
+    title: c.title,
+    count: c.cards.length,
+    x: left + i * (colW + gutter),
+    w: colW,
+    cards: c.cards,
+  }));
+
+  // 卡片纵向堆叠, 记下每张卡的中心 y 供连线使用
+  const boxes = new Map<string, Box>();
+  const headH = 26;
+  let maxBottom = 0;
+  for (const col of columns) {
+    let y = headH + 6;
+    for (const card of col.cards) {
+      const h = Math.min(card.h, 240);
+      const x = col.x;
+      boxes.set(card.key, { key: card.key, x, y, w: colW, h });
+      y += h + 12;
+    }
+    maxBottom = Math.max(maxBottom, y);
+  }
+
+  // 连线只画在列间空隙: 来源卡的右边缘连到目标卡的左边缘, 控制点取空隙中线,
+  // 曲线整体停留在两列之间, 因此不会压到任何卡片, 也不需要绕行。
+  const links: LinkPath[] = [];
+  for (let i = 0; i < columns.length - 1; i += 1) {
+    const fromCol = columns[i];
+    const toCol = columns[i + 1];
+    if (fromCol.cards.length === 0 || toCol.cards.length === 0) continue;
+    const pairs = fromCol.cards.length * toCol.cards.length;
+    const targets = pairs > 9 ? [toCol.cards[0]] : toCol.cards;
+    // 计划卡是信息卡, 不作为连线起点, 否则同一列会射出双倍曲线。
+    const seatCards = fromCol.cards.filter((c) => c.seat !== null);
+    const sources = seatCards.length > 0 ? seatCards : fromCol.cards;
+    sources.forEach((src, si) => {
+      const sb = boxes.get(src.key);
+      if (!sb) return;
+      targets.forEach((dst, di) => {
+        const tb = boxes.get(dst.key);
+        if (!tb) return;
+        const x1 = sb.x + sb.w;
+        const y1 = sb.y + Math.min(sb.h, 56) / 2 + 8;
+        const x2 = tb.x - 2;
+        const y2 = tb.y + Math.min(tb.h, 56) / 2 + 8;
+        const mid = (x1 + x2) / 2;
+        links.push({
+          key: `l-${fromCol.key}-${src.key}-${dst.key}`,
+          d: `M ${x1} ${y1} C ${mid} ${y1}, ${mid} ${y2}, ${x2} ${y2}`,
+          color: src.seat?.accent ?? src.accent ?? 'var(--line-3)',
+          index: si + di,
+          active: (src.seat?.tone ?? src.tone) === 'run' || (dst.seat?.tone ?? dst.tone) === 'run',
+          arrow: true,
+        });
+      });
+    });
+  }
+
+  return { w: planeW, h: maxBottom + 12, columns, links };
+}
+
+function workerCardHeight(seat: Seat): number {
+  const rows = Math.min(3, seat.works.length);
+  return 116 + rows * WORK_LINE + (rows > 0 ? 8 : 0);
+}
+
 /* ------------------------------ 数据推导 ------------------------------ */
 
-function buildAgents(detail: TaskDetail, events: EventEnvelope[]): AgentView[] {
+function rank(state: string): number {
+  const order = ['running', 'verifying', 'awaiting_review', 'queued', 'ready', 'pending', 'produced', 'accepted', 'failed'];
+  const i = order.indexOf(state);
+  return i < 0 ? 99 : i;
+}
+
+function buildSeats(detail: TaskDetail, events: EventEnvelope[]): Seat[] {
   const items = detail.workItems;
   const sessions = [...detail.sessions].sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
   const openSessions = sessions.filter((s) => !s.closedAt);
 
   const sessionFor = (participantId: string) =>
     openSessions.find((s) => s.participantId === participantId) ?? sessions.find((s) => s.participantId === participantId) ?? null;
-  const attemptsFor = (participantId: string) =>
-    detail.attempts
-      .filter((a) => a.participantId === participantId)
-      .sort((a, b) => (a.startedAt < b.startedAt ? 1 : -1));
 
   const toolFor = (sessionId: string | null): string | null => {
     if (!sessionId) return null;
-    const started = new Map<string, { tool: string; seq: number; summary?: string }>();
+    const started = new Map<string, { tool: string; seq: number }>();
     for (const e of events) {
       if (e.sessionId !== sessionId) continue;
-      const p = (e.payload ?? {}) as { toolName?: string; callId?: string; inputSummary?: string };
-      if (e.type === 'tool.started' && p.callId) {
-        started.set(p.callId, { tool: p.toolName ?? 'tool', seq: e.seq, summary: p.inputSummary });
-      } else if (e.type === 'tool.completed' && p.callId) {
-        started.delete(p.callId);
-      }
+      const p = (e.payload ?? {}) as { toolName?: string; callId?: string };
+      if (e.type === 'tool.started' && p.callId) started.set(p.callId, { tool: p.toolName ?? 'tool', seq: e.seq });
+      else if (e.type === 'tool.completed' && p.callId) started.delete(p.callId);
     }
     const last = [...started.values()].sort((a, b) => b.seq - a.seq)[0];
     return last ? last.tool : null;
   };
 
-  return detail.participants.map((p) => {
+  const ordered = [...detail.participants].sort((a, b) => (a.isLead === b.isLead ? 0 : a.isLead ? -1 : 1));
+
+  return ordered.map((p, index) => {
     const profile = detail.profiles.find((x) => x.id === p.profileId) ?? null;
     const session = sessionFor(p.id);
-    const attempts = attemptsFor(p.id);
+    const attempts = detail.attempts
+      .filter((a) => a.participantId === p.id)
+      .sort((a, b) => (a.startedAt < b.startedAt ? 1 : -1));
     const liveAttempt = attempts.find((a) => !a.endedAt) ?? null;
-    const queue = items
+    const works = items
       .filter((w) => w.assignedParticipantId === p.id)
       .sort((a, b) => rank(a.state) - rank(b.state) || (a.createdAt < b.createdAt ? -1 : 1));
-    const item = queue[0] ?? null;
+    const item = works[0] ?? null;
     const tool = toolFor(session?.id ?? null);
 
     let tone: Tone = 'idle';
@@ -404,14 +581,9 @@ function buildAgents(detail: TaskDetail, events: EventEnvelope[]): AgentView[] {
     const liveItem = item && (item.state === 'running' || item.state === 'verifying') ? item : null;
 
     if (liveAttempt || liveItem) {
-      // 有未结束的尝试或工作项正在跑时以执行状态为准, 不被"会话空闲"覆盖。
       tone = 'run';
       stateLabel = liveItem?.state === 'verifying' ? '验证中' : '执行中';
-      doing = tool
-        ? `工具 ${tool}${toolHint(tool)}`
-        : session?.activity === 'tool_running'
-          ? '工具执行中'
-          : (liveItem?.goal ?? '生成回复中…');
+      doing = tool ? `工具 ${tool}` : session?.activity === 'tool_running' ? '工具执行中' : (liveItem?.goal ?? '生成回复中…');
     } else if (session && !session.closedAt) {
       if (session.connectionState === 'disconnected' || session.processHealth === 'exited') {
         tone = 'bad';
@@ -424,7 +596,7 @@ function buildAgents(detail: TaskDetail, events: EventEnvelope[]): AgentView[] {
       } else if (session.activity === 'generating' || session.activity === 'tool_running') {
         tone = 'run';
         stateLabel = '运行中';
-        doing = tool ? `工具 ${tool}${toolHint(tool)}` : '生成回复中…';
+        doing = tool ? `工具 ${tool}` : '生成回复中…';
       } else {
         tone = 'idle';
         stateLabel = '空闲';
@@ -434,7 +606,7 @@ function buildAgents(detail: TaskDetail, events: EventEnvelope[]): AgentView[] {
       if (item.state === 'accepted') {
         tone = 'ok';
         stateLabel = '已完成';
-        doing = `已接受 · ${item.goal}`;
+        doing = item.goal;
       } else if (item.state === 'awaiting_review') {
         tone = 'wait';
         stateLabel = '待审核';
@@ -443,10 +615,6 @@ function buildAgents(detail: TaskDetail, events: EventEnvelope[]): AgentView[] {
         tone = 'bad';
         stateLabel = '失败';
         doing = item.lastError ?? '该工作项失败';
-      } else if (item.state === 'running' || item.state === 'verifying') {
-        tone = 'run';
-        stateLabel = item.state === 'verifying' ? '验证中' : '执行中';
-        doing = item.goal;
       } else {
         tone = 'wait';
         stateLabel = '排队中';
@@ -455,307 +623,26 @@ function buildAgents(detail: TaskDetail, events: EventEnvelope[]): AgentView[] {
     }
 
     const elapsedMs = liveAttempt ? Date.now() - new Date(liveAttempt.startedAt).getTime() : null;
+    const roleLabel = p.isLead ? '主控' : p.role === 'strong' ? '强模型' : '执行者';
 
     return {
-      key: `p:${p.id}`,
+      key: p.id,
       participant: p,
-      roleLabel: p.isLead ? '主控' : p.role === 'strong' ? '强模型' : '执行者',
-      harness: profile?.adapterId ?? '—',
-      model: session?.observedModel ?? profile?.requestedModel ?? '',
+      name: p.displayName,
+      roleLabel,
+      harness: profile?.adapterId ?? 'unknown',
+      model: profile?.requestedModel || profile?.name || '',
+      accent: ACCENTS[index % ACCENTS.length],
+      accentSoft: ACCENT_SOFT[index % ACCENT_SOFT.length],
       tone,
       stateLabel,
       doing,
+      elapsedMs,
+      works,
       item,
-      queue,
       session,
       attempt: liveAttempt,
-      elapsedMs,
-      badge: p.isLead ? '主控' : undefined,
+      root: Boolean(p.isLead),
     };
   });
-}
-
-const HARNESS_SHORT: Record<string, string> = {
-  codex: 'Codex',
-  'claude-code': 'Claude',
-  dsh: 'DSH',
-  mock: 'Mock',
-};
-
-function harnessShort(adapterId: string): string {
-  return HARNESS_SHORT[adapterId] ?? adapterId;
-}
-
-function toolHint(tool: string): string {  const t = tool.toLowerCase();
-  if (t.includes('bash') || t.includes('shell') || t.includes('exec')) return ' · 执行命令';
-  if (t.includes('read')) return ' · 读取文件';
-  if (t.includes('write') || t.includes('edit') || t.includes('patch')) return ' · 写入文件';
-  if (t.includes('grep') || t.includes('search')) return ' · 检索';
-  return '';
-}
-
-function rank(state: string): number {
-  const order = ['running', 'verifying', 'waiting_input', 'awaiting_review', 'queued', 'ready', 'pending', 'accepted', 'failed'];
-  const i = order.indexOf(state);
-  return i < 0 ? 99 : i;
-}
-
-/* ------------------------------ 布局 ------------------------------ */
-
-function buildLayout(
-  detail: TaskDetail,
-  agents: AgentView[],
-  width: number,
-): {
-  placed: PlacedAgent[];
-  lanes: Lane[];
-  links: Link[];
-  deliver: { x: number; y: number; w: number; h: number; tone: Tone; sub: string; doing: string } | null;
-} {
-  const placed: PlacedAgent[] = [];
-  const lanes: Lane[] = [];
-  const links: Link[] = [];
-  const W = Math.max(360, width);
-  const narrow = W < 820;
-
-  const lead = agents.find((a) => a.participant.isLead) ?? agents.find((a) => a.participant.role === 'strong') ?? null;
-  const strongs = agents.filter((a) => a.participant.role === 'strong' && a.key !== lead?.key);
-  const workers = agents.filter((a) => a.participant.role === 'worker');
-
-  const leadW = Math.min(LEAD_W, W - PAD * 2);
-  const leadH = narrow ? 108 : LEAD_H;
-  const leadX = Math.round((W - leadW) / 2);
-  const leadY = 14;
-  if (lead) {
-    placed.push({ view: lead, x: leadX, y: leadY, w: leadW, h: leadH });
-  }
-
-  // 强模型席位
-  const strongW = Math.min(STRONG_W, W - PAD * 2);
-  const strongH = 96;
-  const perRow = narrow ? 1 : Math.max(1, Math.floor((W - PAD * 2 + 22) / (strongW + 22)));
-  let cursorY = leadY + leadH + (strongs.length > 0 ? 62 : 54);
-  const strongTop = cursorY;
-  strongs.forEach((a, i) => {
-    const row = Math.floor(i / perRow);
-    const inRow = Math.min(perRow, strongs.length - row * perRow);
-    const idx = i % perRow;
-    const span = inRow * strongW + (inRow - 1) * 22;
-    const startX = Math.round((W - span) / 2);
-    const x = startX + idx * (strongW + 22);
-    const y = strongTop + row * (strongH + 20);
-    placed.push({ view: a, x, y, w: strongW, h: strongH });
-    if (lead) {
-      const active = a.tone === 'run';
-      const tone: Tone = active ? 'run' : a.tone === 'ok' ? 'ok' : a.tone === 'bad' ? 'bad' : 'idle';
-      links.push({
-        key: `l-${a.participant.id}`,
-        d: curveDown(leadX + leadW / 2, leadY + leadH, x + strongW / 2, y),
-        tone,
-        active,
-        label: detail.task.phase === 'review' ? '交叉审核' : detail.task.phase === 'discussion' ? '讨论' : undefined,
-        labelX: (leadX + leadW / 2 + x + strongW / 2) / 2 + 26,
-        labelY: (leadY + leadH + y) / 2,
-      });
-    }
-  });
-  cursorY = strongTop + Math.ceil(strongs.length / perRow) * (strongH + 20) + (strongs.length > 0 ? 34 : 0);
-
-  // 执行泳道: 每个执行者一条, 没有执行者时主控自己一条
-  const laneOwners = workers.length > 0 ? workers : lead ? [lead] : [];
-  const workerW = Math.min(WORKER_W, W - PAD * 2);
-  let laneY = cursorY;
-  for (const [laneIndex, owner] of laneOwners.entries()) {
-    const chips = owner.queue.map((w) => w);
-    const isLeadLane = lead !== null && owner.key === lead.key;
-    const cardW = isLeadLane ? leadW : workerW;
-    const cardH = isLeadLane ? leadH : WORKER_H;
-    const cardX = isLeadLane ? leadX : narrow ? Math.round((W - workerW) / 2) : PAD;
-    const cardY = isLeadLane ? leadY : laneY + Math.round((WORKER_H - cardH) / 2);
-    const chipStartX = narrow ? PAD : isLeadLane ? PAD : PAD + workerW + 52;
-    const usable = narrow ? W - PAD * 2 : W - chipStartX - PAD - 8;
-    const perChipRow = narrow ? 1 : Math.max(1, Math.floor((usable + CHIP_GAP) / (CHIP_W + CHIP_GAP)));
-    const chipRows = Math.max(1, Math.ceil(chips.length / perChipRow));
-    const laneH = narrow
-      ? cardH + 18 + chips.length * (CHIP_H + 12) + 8
-      : Math.max(isLeadLane ? CHIP_H + 24 : WORKER_H, chipRows * CHIP_H + (chipRows - 1) * 14 + 24);
-
-    const lane: Lane = { workerKey: owner.key, y: laneY, h: laneH, chips: [], endX: 0, endY: 0 };
-    if (chips.length > 0) lanes.push(lane);
-
-    if (!isLeadLane) {
-      placed.push({ view: owner, x: cardX, y: cardY, w: cardW, h: cardH });
-    }
-
-    if (lead && owner.key !== lead.key) {
-      const fromX = leadX + 18 + laneIndex * 12;
-      const fromY = leadY + leadH - 6;
-      const active = owner.tone === 'run';
-      const trunkY = laneY - 16;
-      const path = downThenAcross(fromX, fromY, cardX + cardW / 2, cardY, trunkY, 16);
-      links.push({
-        key: `lq-${owner.participant.id}`,
-        d: path.d,
-        tone: active ? 'run' : owner.tone === 'ok' ? 'ok' : owner.tone === 'bad' ? 'bad' : 'idle',
-        active,
-        label: '派发',
-        labelX: cardX + cardW / 2 + 30,
-        labelY: trunkY - 5,
-      });
-    }
-
-    chips.forEach((item, i) => {
-      const row = Math.floor(i / perChipRow);
-      const idx = i % perChipRow;
-      const x = narrow ? PAD : chipStartX + idx * (CHIP_W + CHIP_GAP);
-      const chipW = narrow ? W - PAD * 2 : CHIP_W;
-      const y = narrow
-        ? cardY + cardH + 18 + row * (CHIP_H + 12)
-        : laneY + 12 + row * (CHIP_H + 14);
-      const chip: Chip = {
-        key: `c-${item.id}`,
-        label: fitText(item.goal, 132),
-        state: item.state,
-        item,
-        x,
-        y,
-        w: chipW,
-        h: CHIP_H,
-        active: item.state === 'running' || item.state === 'verifying',
-      };
-      const prev = lane.chips[lane.chips.length - 1];
-      lane.chips.push(chip);
-      if (prev && row === Math.floor((i - 1) / perChipRow)) {
-        links.push({
-          key: `c-${item.id}-link`,
-          d: `M ${prev.x + prev.w} ${prev.y + prev.h / 2} C ${prev.x + prev.w + 16} ${prev.y + prev.h / 2}, ${x - 16} ${y + CHIP_H / 2}, ${x} ${y + CHIP_H / 2}`,
-          tone: chip.active ? 'run' : item.state === 'accepted' ? 'ok' : item.state === 'failed' ? 'bad' : 'idle',
-          active: chip.active,
-        });
-      } else if (!prev) {
-        const fromX = narrow ? cardX + cardW / 2 : cardX + cardW;
-        const fromY = narrow ? cardY + cardH : cardY + cardH / 2;
-        links.push({
-          key: `c-${item.id}-entry`,
-          d: narrow
-            ? curveDown(fromX, fromY, x + CHIP_W / 2, y)
-            : `M ${fromX} ${fromY} C ${fromX + 20} ${fromY}, ${x - 20} ${y + CHIP_H / 2}, ${x} ${y + CHIP_H / 2}`,
-          tone: chip.active ? 'run' : 'idle',
-          active: chip.active,
-        });
-      }
-    });
-
-    const lastChip = lane.chips[lane.chips.length - 1];
-    if (lastChip) {
-      lane.endX = lastChip.x + lastChip.w;
-      lane.endY = lastChip.y + lastChip.h / 2;
-    } else {
-      lane.endX = cardX + cardW;
-      lane.endY = cardY + cardH / 2;
-    }
-
-    laneY += (chips.length > 0 ? laneH : isLeadLane ? 0 : WORKER_H) + (narrow ? 26 : 22);
-  }
-
-  const hasArtifact = detail.reviewRounds.length > 0 || detail.task.lifecycle === 'completed';
-  let deliver: { x: number; y: number; w: number; h: number; tone: Tone; sub: string; doing: string } | null = null;
-  if (hasArtifact) {
-    const dw = Math.min(DELIVER_W, W - PAD * 2);
-    const dx = Math.round((W - dw) / 2);
-    const dy = laneY + 64;
-    const accepted = detail.workItems.filter((w) => w.state === 'accepted').length;
-    const done = detail.task.lifecycle === 'completed';
-    deliver = {
-      x: dx,
-      y: dy,
-      w: dw,
-      h: DELIVER_H,
-      tone: done ? 'ok' : 'wait',
-      sub: `${detail.artifacts.length} 个已登记文件 · ${detail.reviewRounds.length} 轮审核`,
-      doing: done ? `交付完成 · 工作项 ${accepted}/${detail.workItems.length} 已接受` : `收集中 · 工作项 ${accepted}/${detail.workItems.length} 已接受`,
-    };
-    lanes.forEach((lane, i) => {
-      const trunkY = dy - 22 - i * 17;
-      const path = downThenAcross(lane.endX, lane.endY + 4, dx + dw / 2 + (i - (lanes.length - 1) / 2) * 12, dy, trunkY);
-      links.push({
-        key: `ld-${lane.workerKey}`,
-        d: path.d,
-        tone: done ? 'ok' : lane.chips.some((c) => c.active) ? 'run' : 'idle',
-        active: lane.chips.some((c) => c.active),
-        label: '回传',
-        labelX: path.labelX,
-        labelY: path.labelY,
-      });
-    });
-  }
-
-  return { placed, lanes, links, deliver };
-}
-
-function curveDown(x1: number, y1: number, x2: number, y2: number): string {
-  const my = y1 + (y2 - y1) * 0.55;
-  return `M ${x1} ${y1} C ${x1} ${my}, ${x2} ${my}, ${x2} ${y2}`;
-}
-
-/** 下行 → 横移到主干高度 → 再横移 → 落到目标顶部; 用于多条回传线收束。 */
-function downThenAcross(
-  x1: number,
-  y1: number,
-  x2: number,
-  y2: number,
-  trunkY: number,
-  radius = 16,
-): { d: string; labelX: number; labelY: number } {
-  const dir = x2 === x1 ? 1 : Math.sign(x2 - x1);
-  const r = Math.min(radius, Math.abs(x2 - x1) / 2, Math.max(6, Math.abs(trunkY - y1) / 2));
-  const d = [
-    `M ${x1} ${y1}`,
-    `L ${x1} ${trunkY - r}`,
-    `Q ${x1} ${trunkY}, ${x1 + dir * r} ${trunkY}`,
-    `L ${x2 - dir * r} ${trunkY}`,
-    `Q ${x2} ${trunkY}, ${x2} ${trunkY + r}`,
-    `L ${x2} ${y2}`,
-  ].join(' ');
-  return { d, labelX: (x1 + x2) / 2, labelY: trunkY - 5 };
-}
-
-/** 直角圆角折线: 先垂直下到中线, 再横移到目标列, 最后落到目标顶部。 */
-function elbow(
-  x1: number,
-  y1: number,
-  x2: number,
-  y2: number,
-  radius = 18,
-): { d: string; midX: number; midY: number } {
-  const midY = Math.round(y1 + Math.max(30, (y2 - y1) * 0.45));
-  const dir = x2 === x1 ? 1 : Math.sign(x2 - x1);
-  const r = Math.min(radius, Math.abs(x2 - x1) / 2, Math.max(8, y2 - midY));
-  const d = [
-    `M ${x1} ${y1}`,
-    `L ${x1} ${midY - r}`,
-    `Q ${x1} ${midY}, ${x1 + dir * r} ${midY}`,
-    `L ${x2 - dir * r} ${midY}`,
-    `Q ${x2} ${midY}, ${x2} ${midY + r}`,
-    `L ${x2} ${y2}`,
-  ].join(' ');
-  return { d, midX: (x1 + x2) / 2, midY };
-}
-
-function fitText(text: string, maxPx: number): string {
-  const flat = text.replace(/\s+/g, ' ').trim();
-  let out = '';
-  let w = 0;
-  for (const ch of flat) {
-    const cw = (ch.codePointAt(0) ?? 0) > 0x2e80 ? 11.5 : 6.4;
-    if (w + cw > maxPx) return `${out}…`;
-    out += ch;
-    w += cw;
-  }
-  return out;
-}
-
-/** 供其他组件复用的会话活动文案。 */
-export function activityText(activity: string): string {
-  return ACTIVITY_LABEL[activity as keyof typeof ACTIVITY_LABEL] ?? activity;
 }
