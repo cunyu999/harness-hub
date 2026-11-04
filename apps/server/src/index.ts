@@ -116,10 +116,19 @@ async function main(): Promise<void> {
         ownerAlive = false;
       }
     }
-    if (ownerAlive || !repo.acquireLease('server', process.pid, nonce, 0)) {
+    if (ownerAlive) {
+      // 已经在跑: 这是重复启动, 不是错误。告诉用户去哪里访问即可。
+      // eslint-disable-next-line no-console
+      console.log(
+        `[harness-hub] 服务已在运行: http://${cfg.host}:${cfg.port} (pid=${held?.ownerPid ?? '?'}), 无需重复启动。`,
+      );
+      db.close();
+      return;
+    }
+    if (!repo.acquireLease('server', process.pid, nonce, 0)) {
       // eslint-disable-next-line no-console
       console.error(
-        `[harness-hub] 已有实例持有单实例锁 (pid=${held?.ownerPid ?? '?'}), 本次启动中止。`,
+        `[harness-hub] 无法取得单实例锁 (原 pid=${held?.ownerPid ?? '?'}), 本次启动中止。`,
       );
       process.exit(1);
     }
