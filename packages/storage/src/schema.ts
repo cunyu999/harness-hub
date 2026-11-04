@@ -336,4 +336,10 @@ ALTER TABLE execution_profiles ADD COLUMN sandbox TEXT NOT NULL DEFAULT 'workspa
 ALTER TABLE tasks ADD COLUMN workspace_root TEXT;
 `,
   },
+  {
+    version: 4,
+    name: 'work-note',
+    // 执行者/审核者中途提问后, 用户回答的原话; 下一轮工作项回合会把它带进提示。
+    sql: 'ALTER TABLE work_items ADD COLUMN user_note TEXT;',
+  },
 ];

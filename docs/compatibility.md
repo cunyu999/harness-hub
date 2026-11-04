@@ -76,3 +76,14 @@ live 探针的判定同时在这次核验中收紧: 只有**真实回合成功**
 3. Claude Code 每次回合以 `resume` 续接会话; 若原生会话被清理, 会退化为新会话(事件中可见)。
 4. 全局配置目录(`~/.codex`、`~/.claude`、`~/.dsh`)只读: 服务端把需要的文件**复制**到 `.local/homes/`, 不写回。
 5. 单实例: 通过 `runtime_leases` 表 + 心跳实现; 异常退出后仅当原 PID 不存在才接管。
+
+### 验证命令的执行环境
+
+`validationCommand` 在任务工作区根目录执行, 通过系统外壳运行:
+
+| 平台 | 执行方式 | 环境变量 | 注意 |
+| --- | --- | --- | --- |
+| Windows | `cmd.exe /d /s /c` | 继承本进程环境, 仅覆盖 TEMP/TMP/TMPDIR/XDG_CACHE_HOME/npm_config_cache/HH_TASK_ID | 没有 `grep/sed/awk/cat`; 路径分隔符要用 `\\`, `./x` 会被归一成 `.\\x` |
+| Linux/macOS | `/bin/sh -c` | 同上 | 命令必须不交互, 退出码 0 才算通过 |
+
+这条约束会写进计划提示(`VALIDATION_SHELL_NOTE`), 让模型按平台给出可执行的命令。

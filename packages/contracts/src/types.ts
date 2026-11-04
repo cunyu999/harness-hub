@@ -393,6 +393,8 @@ export interface WorkItem {
   attemptCount: number;
   result: WorkItemResult | null;
   lastError: string | null;
+  /** 用户针对本工作项提问给出的回答; 恢复该工作项时带进下一轮提示。 */
+  userNote?: string | null;
   createdAt: string;
   updatedAt: string;
 }

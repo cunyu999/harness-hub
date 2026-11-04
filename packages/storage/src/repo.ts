@@ -425,13 +425,14 @@ export class Repo {
     const next = { ...cur, ...patch, updatedAt: nowIso() };
     this.db.run(
       `UPDATE work_items SET state=?, assigned_participant_id=?, repair_round=?, attempt_count=?,
-        result_json=?, last_error=?, updated_at=? WHERE id=?`,
+        result_json=?, last_error=?, user_note=?, updated_at=? WHERE id=?`,
       next.state,
       next.assignedParticipantId,
       next.repairRound,
       next.attemptCount,
       next.result ? J(next.result) : null,
       next.lastError,
+      next.userNote ?? null,
       next.updatedAt,
       id,
     );
@@ -1266,6 +1267,7 @@ function mapWorkItem(r: any): WorkItem {
     attemptCount: r.attempt_count,
     result: PJ<any>(r.result_json, null),
     lastError: r.last_error,
+    userNote: r.user_note ?? null,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };

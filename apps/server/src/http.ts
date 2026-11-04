@@ -115,6 +115,7 @@ export class ApiServer {
     this.add('POST', '/api/tasks/:id/plan-decisions', (ctx) => this.decidePlan(ctx));
     this.add('POST', '/api/tasks/:id/messages', (ctx) => this.postMessage(ctx));
     this.add('POST', '/api/tasks/:id/controls', (ctx) => this.control(ctx));
+    this.add('POST', '/api/tasks/:id/work-items/:itemId/retry', (ctx) => this.retryWorkItem(ctx));
     this.add('GET', '/api/tasks/:id/artifacts', (ctx) => this.listArtifacts(ctx));
     this.add('GET', '/api/tasks/:id/reviews', (ctx) => this.getReviews(ctx));
 
@@ -591,6 +592,12 @@ export class ApiServer {
     const out = { task, snapshot: this.engine.snapshot(task.id) };
     if (idemKey) this.repo.putIdempotent('control', idemKey, out);
     return out;
+  }
+
+  private async retryWorkItem(ctx: Ctx) {
+    const body = (ctx.body ?? {}) as { note?: unknown };
+    await this.engine.retryWorkItem(ctx.params.id, ctx.params.itemId, typeof body.note === 'string' ? body.note : undefined);
+    return this.engine.snapshot(ctx.params.id);
   }
 
   private listArtifacts(ctx: Ctx): ArtifactDto[] {

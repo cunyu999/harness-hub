@@ -159,3 +159,22 @@
 - 源码仓库: <https://github.com/cunyu999/harness-hub>(public, 默认分支 `main`), 2026-11-04 由用户授权后首次推送。
 - 纳入版本控制: 源码(`apps/`、`packages/`)、测试(`tests/`)、文档与截图(`docs/`)、`package.json` + `package-lock.json`、`tsconfig.json`、`SYSTEM_BLUEPRINT.md`、`THIRD-PARTY-NOTICES.md`。
 - 排除: `.local/`(数据库、工作区、日志、凭据副本)、`node_modules/`、`dist/`、`apps/web/dist/`、`.npmrc`(含本机绝对缓存路径)、`START_HERE.md`(对话交接说明)。
+
+## 真实 E2E 暴露的问题(hello world)
+
+用 Claude Code(主控/强模型) + DeepSeek Harness(执行者) 连跑 hello world, 每轮暴露一个真实缺陷, 均已修复:
+
+| # | 现象 | 根因 | 修复 |
+| --- | --- | --- | --- |
+| 1 | 适配器报 `prompt_failed: Cannot read properties of undefined (reading 'stopReason')` | DSH 的 `session/prompt` 返回空结果时直接读字段 | 空结果按 `prompt_failed` 处理, live 探针同样回退为 `empty_result` |
+| 2 | 验证命令全部失败但只显示"验证未通过" | 失败分支没带出检查项与输出 | 失败信息改为 `验证未通过 (<checkId>: <detail 前 300 字>)` |
+| 3 | Windows 弹 `cmd.exe 0xc0000142`, 验证永远失败 | `runValidationCommand` 只传任务级临时目录环境, 丢了 `SystemRoot`/`PATH`/`ComSpec` | 改为 `{ ...process.env, ...taskSessionEnv(taskId) }`, 并显式传 taskId |
+| 4 | `./hello.exe` 在 cmd 下报 `'.' 不是内部或外部命令` | 模型按 Unix 习惯写验证命令 | Windows 上把 `./` 归一成 `.\\`, 并在计划提示里写明规则 |
+| 5 | 只读/复核类工作项永远 `verification_failed` | 判定要求"有产物", 而复核项本来不产出文件 | 改为"声明了输出路径才要求产物" |
+
+同时补了两条运行期补救能力(真实 E2E 卡住后必须有出口):
+
+- **回答澄清并继续**: 工作项进入 `waiting_input` 后, 用户在对话里选"回答"(intent=answer), 回答会写进该工作项的 `user_note`(迁移 4), 该项回到 `pending` 继续执行, 不再被当成闲聊。
+- **单项重试**: `POST /api/tasks/:id/work-items/:itemId/retry`, 就地重跑某一项(可附 note), 不产生新计划版本, 已接受的其他项不受影响; 交付后重试会重新走审核与交付。
+
+测试: 新增 `tests/recover.test.ts`(2 项), 合计 **45/45**。

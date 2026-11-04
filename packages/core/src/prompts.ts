@@ -206,6 +206,9 @@ export function buildWorkPrompt(
   item: PlanWorkItem,
   contextPack: Record<string, unknown>,
 ): BuiltPrompt {
+  const userNoteBlock = contextPack.userNote
+    ? '4. 上一轮你请求用户澄清, 用户回答: "' + String(contextPack.userNote) + '" —— 按这个回答继续完成本项, 不要再重复提问。\n'
+    : '';
   const outputs = item.expectedOutputs
     .map((o) => `- ${o.relativePath} (${o.format}); 校验: ${o.validation}${o.validationCommand ? ` [${o.validationCommand}]` : ''}`)
     .join('\n');
@@ -217,7 +220,7 @@ ${outputs || '- (本项没有声明文件产物, 请在结果中说明实际完�
 2. 允许写入范围: ${item.writeScope.join(', ') || '(仅输出文件)'}
 3. 验收标准:
 ${item.acceptanceCriteria.map((c) => `   - ${c}`).join('\n')}
-4. 完成后只输出一个 JSON 对象:
+${userNoteBlock}5. 完成后只输出一个 JSON 对象:
 {
   "workItemId": "${item.id}",
   "attemptId": string|null,

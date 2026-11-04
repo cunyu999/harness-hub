@@ -150,12 +150,12 @@ export class DshAdapter implements HarnessAdapter {
             }
             // live 探针必须证明"认证 + 模型 + 一个真实回合"都能跑通, 否则无法区分
             // "会话建得起来" 和 "模型其实不可用"。
-            const turn = await rpc.call<Record<string, unknown>>(
+            const turn = await rpc.call<Record<string, unknown> | undefined>(
               'session/prompt',
               { sessionId: s.sessionId, prompt: [{ type: 'text', text: '只输出 OK 两个字符, 不要解释。' }] },
               120000,
             );
-            const stopReason = String(turn.stopReason ?? 'unknown');
+            const stopReason = turn && typeof turn === 'object' ? String(turn.stopReason ?? 'unknown') : 'empty_result';
             await rpc.call('session/close', { sessionId: s.sessionId }, 15000).catch(() => undefined);
             liveDetail = `真实回合结束 (stopReason=${stopReason})`;
             if (stopReason !== 'end_turn') {
@@ -542,11 +542,22 @@ class DshSession implements AdapterSession {
       }
     }, timeoutMs);
     try {
-      const r = await this.rpc.call<Record<string, unknown>>(
+      const r = await this.rpc.call<Record<string, unknown> | undefined>(
         'session/prompt',
         { sessionId, prompt: [{ type: 'text', text: req.prompt }] },
         timeoutMs,
       );
+      if (!r || typeof r !== 'object') {
+        // harness 可能在回合中途退出或回了空 result; 不能当成"正常结束"
+        this.settleWaiter({
+          status: 'failed',
+          errorClass: 'prompt_failed',
+          errorMessage: 'session/prompt 返回空结果(harness 可能提前退出)',
+        });
+        const emptyOutcome = await done;
+        clearTimeout(timer);
+        return emptyOutcome;
+      }
       waiter.stopReason = r.stopReason ? String(r.stopReason) : null;
     } catch (err) {
       if (!waiter.settle) {

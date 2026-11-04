@@ -1493,6 +1493,7 @@ export class Engine implements AdapterHost {
       repairRound: item.repairRound,
       lastError: item.lastError,
       priorResult: item.result,
+      userNote: item.userNote ?? null,
       previousArtifacts: this.repo
         .listArtifacts(taskId)
         .filter((a) => a.workItemId !== item.id && a.status === 'registered')
@@ -1503,7 +1504,7 @@ export class Engine implements AdapterHost {
       purpose: `work:${item.planItemId}`,
       expectsJson: true,
     });
-    this.repo.updateWorkItem(item.id, { attemptCount: item.attemptCount + 1 });
+    this.repo.updateWorkItem(item.id, { attemptCount: item.attemptCount + 1, userNote: null });
 
     if (outcome.status !== 'completed') {
       await this.handleAttemptFailure(task, this.repo.getWorkItem(item.id)!, outcome);
@@ -1711,7 +1712,33 @@ export class Engine implements AdapterHost {
         );
       }
       if (spec.validationCommand && abs && exists) {
-        const cmd = await this.runValidationCommand(workspace, spec.validationCommand);
+        // 模型有时会把"要检查的文件"直接写成 validationCommand(例如 deliverables\\run_output.txt),
+        // 在 cmd 里那只会得到 "'deliverables' is not recognized" —— 这属于计划错误, 直接给出可执行的改法。
+        const firstToken = spec.validationCommand.trim().split(/\s+/)[0] ?? '';
+        const notACommand = /\.(txt|md|markdown|json|log|csv|cpp|cc|cxx|h|hpp|docx|xlsx|pptx|pdf)$/i.test(firstToken);
+        if (notACommand) {
+          const message =
+            `validationCommand 看起来是文件路径而不是命令: "${firstToken}"。` +
+            '要检查文件内容请写 findstr /c:"关键字" 路径(Windows)或 grep -q 关键字 路径, ' +
+            '要检查可执行程序请写完整命令, 例如 deliverables\\hello.exe。';
+          allPassed = false;
+          results.push(
+            this.recordVerification(
+              task,
+              item,
+              setHash,
+              `cmd:${spec.relativePath}`,
+              spec.validationCommand,
+              'failed',
+              '',
+              null,
+              message,
+            ),
+          );
+          continue;
+        }
+
+        const cmd = await this.runValidationCommand(workspace, spec.validationCommand, task.id);
         if (cmd.exitCode !== 0) allPassed = false;
         results.push(
           this.recordVerification(
@@ -1734,11 +1761,18 @@ export class Engine implements AdapterHost {
         payload: { verificationId: r.id, workItemId: item.id, checkId: r.checkId, status: r.status, detail: r.detail },
       });
     }
-    if (allPassed && artifacts.length > 0) {
+    // 只读/复核类工作项本来就没有文件产物(expectedOutputs 为空), 不能因此判失败。
+    const needsFiles = item.outputSpecs.length > 0;
+    if (allPassed && (!needsFiles || artifacts.length > 0)) {
       this.repo.updateWorkItem(item.id, { state: 'awaiting_review', updatedAt: nowIso() });
       this.emit('work_item.updated', { taskId: task.id, payload: { workItemId: item.id, state: 'awaiting_review' } });
     } else {
-      const detail = allPassed ? '没有登记到产物' : '验证未通过';
+      // 把第一条失败的检查连同它的真实输出写进错误信息, 否则用户只看到"验证未通过"无从下手
+      const firstFailed = results.find((r) => r.status === 'failed');
+      const failedText = firstFailed
+        ? `${firstFailed.checkId}: ${trim(firstFailed.detail ?? '').slice(0, 300) || '无输出'}`
+        : '';
+      const detail = allPassed ? '声明了输出路径但没有登记到产物' : `验证未通过 (${failedText})`;
       if (item.repairRound < task.limits.maxRepairRounds) {
         this.repo.updateWorkItem(item.id, {
           state: 'pending',
@@ -1786,14 +1820,23 @@ export class Engine implements AdapterHost {
     // 表列名与契约字段对齐, 由 repo 负责映射
   }
 
-  private runValidationCommand(cwd: string, command: string): Promise<{ exitCode: number | null; output: string }> {
+  private runValidationCommand(
+    cwd: string,
+    command: string,
+    taskId: string,
+  ): Promise<{ exitCode: number | null; output: string }> {
     return new Promise((resolve) => {
       const shell = process.platform === 'win32' ? 'cmd.exe' : '/bin/sh';
-      const args = process.platform === 'win32' ? ['/d', '/s', '/c', command] : ['-c', command];
+      // 模型常写 Unix 风格的 ./hello.exe, 在 cmd 里会报 "'.' is not recognized";
+      // 这里只做分隔符归一化, 不改变命令语义。
+      const normalized = process.platform === 'win32' ? command.replace(/\.\//g, '.\\') : command;
+      const args = process.platform === 'win32' ? ['/d', '/s', '/c', normalized] : ['-c', normalized];
       const child = spawn(shell, args, {
         cwd,
         windowsHide: true,
-        env: { ...this.taskSessionEnv(path.basename(path.dirname(cwd))) },
+        // 只覆盖临时目录, 其余必须继承: 缺 SystemRoot / PATH / ComSpec 时
+        // Windows 上的 cmd.exe 会直接以 0xc0000142(DLL 初始化失败)退出。
+        env: { ...process.env, ...this.taskSessionEnv(taskId) },
       });
       let output = '';
       const timer = setTimeout(() => {
@@ -2205,6 +2248,28 @@ export class Engine implements AdapterHost {
       return;
     }
     if (task.lifecycle === 'waiting_user') {
+      // 执行者/审核者停在 needs_input 时, 用户回答应该送它继续跑, 而不是变成一段闲聊。
+      const waiting = this.repo.listWorkItems(taskId).filter((w) => w.state === 'waiting_input');
+      if (input.intent === 'answer' && waiting.length > 0) {
+        this.touchTask(taskId, { lifecycle: 'active', phase: 'execution', errorCode: null, errorMessage: null });
+        for (const item of waiting) {
+          this.repo.updateWorkItem(item.id, { state: 'pending', userNote: input.text, lastError: null });
+          this.emit('work_item.updated', {
+            taskId,
+            payload: { workItemId: item.id, state: 'pending', resumed: true },
+          });
+        }
+        this.emit('task.control', {
+          taskId,
+          payload: {
+            action: 'work_item_resumed',
+            items: waiting.map((w) => w.planItemId),
+            note: input.text.slice(0, 400),
+          },
+        });
+        void this.pump(taskId);
+        return;
+      }
       this.touchTask(taskId, { lifecycle: 'active' });
     }
     const liveTask = this.requireTask(taskId);
@@ -2228,6 +2293,29 @@ export class Engine implements AdapterHost {
         // runTurn 已通过事件记录 message.completed
       }
     });
+  }
+
+  /** 只重跑某一个工作项: 不产生新计划版本, 也不动已接受的其他项。 */
+  async retryWorkItem(taskId: string, workItemId: string, note?: string): Promise<void> {
+    const task = this.requireTask(taskId);
+    // 已交付的任务也允许单项重试: 相当于重开该项, 之后会重新审核与交付。
+    if (['cancelled', 'cancelling'].includes(task.lifecycle)) {
+      throw new EngineError('task_not_retryable', '任务处于 ' + task.lifecycle + ', 不能重试单个工作项', 409);
+    }
+    const item = this.repo.getWorkItem(workItemId);
+    if (!item || item.taskId !== taskId) throw new EngineError('work_item_not_found', '工作项不存在', 404);
+    if (item.state === 'running' || item.state === 'queued') {
+      throw new EngineError('work_item_busy', '该工作项正在运行, 不能重试', 409);
+    }
+    this.repo.updateWorkItem(item.id, {
+      state: 'pending',
+      lastError: null,
+      userNote: note?.trim() ? note.trim() : item.userNote ?? null,
+    });
+    this.emit('work_item.updated', { taskId, payload: { workItemId: item.id, state: 'pending', retried: true } });
+    this.emit('task.control', { taskId, payload: { action: 'work_item_retried', item: item.planItemId } });
+    this.touchTask(taskId, { lifecycle: 'active', phase: 'execution', errorCode: null, errorMessage: null });
+    void this.pump(taskId);
   }
 
   async control(taskId: string, action: 'pause_dispatch' | 'resume' | 'cancel' | 'cancel_session', sessionId?: string): Promise<TaskRecord> {
