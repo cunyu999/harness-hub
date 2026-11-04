@@ -31,8 +31,14 @@
 - 适配器 `packages/adapters`: mock(确定性)、Codex(app-server JSON-RPC)、Claude Code(Agent SDK)、DSH(ACP stdio)。
 - 服务端 `apps/server`: node:http 路由(含 Host/Origin/Content-Type 校验)、SSE(快照 + 增量 + 心跳 + resync)、
   私有 home 准备、静态资源、单实例租约(失效锁可接管)。
-- 前端 `apps/web`: React + Vite, 深色 Lancer 风格; 统一主对话、协作图、节点详情、计划确认(直接执行/补充/重新计划)、
-  审批、审核结果、交付物预览、事件时间线、执行配置探针面板。
+- 前端 `apps/web`: React + Vite, Lancer 风格双主题界面(浅色 / 深色, 侧栏一键切换并记忆, 首帧无闪白);
+  统一主对话、协作图、节点详情、计划确认(直接执行/补充/重新计划)、审批、审核结果、交付物预览、
+  事件时间线、执行配置探针面板。布局在 1400/1180/980px 三档断点重排。
+- 界面重做(m03169 之后): `apps/web/src/lib/theme.ts` 新增主题钩子; `index.html` 内联脚本在首帧前定主题;
+  `styles.css` 重写为双主题令牌(深色 #0a0b10 / 浅色 #f6f7fb, 强调色与语义色各一套);
+  协作图改为按容器真实尺寸布局(`ResizeObserver` + CSS 点阵背景 + 节点投影), 修掉了 SVG 等比缩放导致的
+  文字误穿与左右留白, 以及等宽字体在 10.5px 下出现横线穿透的渲染问题;
+  修复任务列表/标题/表格/产物预览处的文字裁切(ellipsis + `overflow-wrap`), 产物预览改为整段可读(不再半行截断)。
 - 自动化测试 `tests/`: 25 项通过(`npm test`)。
   - `tests/core.test.ts` 14 项: 路径安全、计划校验(强制全部强模型审核/越界拒绝/未选参与者报错/依赖环/数量上限)、
     调度(依赖就绪、并发上限、每配置串行、写入范围冲突、死锁判定)。
@@ -71,7 +77,7 @@
 1. 真实任务验收(课程报告 / C++ 程序设计): 需用户给出执行配置与范围; 建议 Claude Code 主控+强模型、DSH 执行者。
 2. 真实 harness 下的取消/重启/并行写入实测(目前只有 mock 演练)。
 3. MON-06 时延测量与 UI-03 窄屏/无障碍系统测试。
-4. 前端细节: 协作图在 1 个参与者时偏空, 可再优化布局。
+4. 前端细节: 单参与者时协作图仍偏空, 可考虑补充阶段时间轴或运行指标条。
 
 ## 已知问题
 
@@ -81,6 +87,6 @@
 
 ## 仓库
 
-- 源码仓库: <https://github.com/cunyu999/harness-hub>(private, 默认分支 `main`), 2026-11-04 由用户授权后首次推送。
+- 源码仓库: <https://github.com/cunyu999/harness-hub>(public, 默认分支 `main`), 2026-11-04 由用户授权后首次推送。
 - 纳入版本控制: 源码(`apps/`、`packages/`)、测试(`tests/`)、文档与截图(`docs/`)、`package.json` + `package-lock.json`、`tsconfig.json`、`SYSTEM_BLUEPRINT.md`、`THIRD-PARTY-NOTICES.md`。
 - 排除: `.local/`(数据库、工作区、日志、凭据副本)、`node_modules/`、`dist/`、`apps/web/dist/`、`.npmrc`(含本机绝对缓存路径)、`START_HERE.md`(对话交接说明)。

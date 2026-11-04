@@ -21,10 +21,12 @@ function MessageBody({ text, kind }: { text: string; kind: string }) {
   } catch {
     /* 不是合法 JSON 就按原文折叠 */
   }
+  const bytes = new TextEncoder().encode(trimmed).length;
+  const sizeLabel = bytes >= 1024 ? `${(bytes / 1024).toFixed(1)} KB` : `${bytes} B`;
   return (
     <div className="json-msg">
       <button className="linkish" onClick={() => setOpen((v) => !v)}>
-        {open ? '收起结构化内容' : `展开结构化内容 (${Math.round(trimmed.length / 1024)} KB)`} · {title}
+        {open ? '收起结构化内容' : `展开结构化内容 (${sizeLabel})`} · {title}
       </button>
       {open ? <pre className="json-body">{text}</pre> : null}
     </div>
