@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { TaskDetail } from '../api';
 import type { EventEnvelope } from '../../../../packages/contracts/src/events';
 import type { ManagedSession, Participant, RunAttempt, TaskPhase, WorkItem } from '../../../../packages/contracts/src/types';
@@ -29,17 +29,7 @@ const HARNESS_SHORT: Record<string, string> = {
 
 const PHASE_STEPS: TaskPhase[] = ['planning', 'discussion', 'execution', 'integration', 'verification', 'review', 'delivery'];
 
-const PAD = 28;
-const GAP = 22;
-const ROOT_W = 392;
-const ROOT_H = 128;
-const CARD_MIN = 178;
-const CARD_MAX = 268;
-const CARD_BASE = 122;
-const WORK_LINE = 23;
 const MAX_WORKS = 4;
-const GUTTER_TOP = 78;
-const GUTTER_BOTTOM = 88;
 
 interface Seat {
   key: string;
@@ -83,22 +73,8 @@ export function CollabGraph({
   selection: GraphSelection;
   onSelect: (s: GraphSelection) => void;
 }) {
-  const wrapRef = useRef<HTMLDivElement | null>(null);
-  const [width, setWidth] = useState(920);
-
-  useEffect(() => {
-    const el = wrapRef.current;
-    if (!el) return;
-    const ro = new ResizeObserver(() => {
-      const rect = el.getBoundingClientRect();
-      if (rect.width > 60) setWidth(Math.round(rect.width));
-    });
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
-
   const seats = useMemo(() => buildSeats(detail, events), [detail, events]);
-  const plan = useMemo(() => buildPlan(detail, seats, width), [detail, seats, width]);
+  const stages = useMemo(() => buildStages(detail, seats), [detail, seats]);
   const running = seats.some((s) => s.tone === 'run');
   const now = useNow(running);
 
@@ -111,7 +87,7 @@ export function CollabGraph({
   };
 
   return (
-    <div className="cx" ref={wrapRef}>
+    <div className="cx">
       <div className="cx-head">
         <PhaseStepper phase={detail.task.phase} lifecycle={detail.task.lifecycle} />
         <div className="cx-summary">
@@ -144,76 +120,59 @@ export function CollabGraph({
         </div>
       </div>
 
-      <div className="cx-scroll">
-        <div className="cx-plane" style={{ width: plan.w, height: plan.h }}>
-          <svg className="cx-links" width={plan.w} height={plan.h} viewBox={`0 0 ${plan.w} ${plan.h}`} aria-hidden="true">
-            <defs>
-              {ACCENTS.map((c, i) => (
-                <marker key={i} id={`cx-arrow-${i}`} viewBox="0 0 8 8" refX="6.4" refY="4" markerWidth="5" markerHeight="5" orient="auto">
-                  <path d="M 0 0.7 L 6.6 4 L 0 7.3 z" fill={c} opacity="0.7" />
-                </marker>
-              ))}
-            </defs>
-            {plan.links.map((l) => (
-              <g key={l.key}>
-                <path
-                  d={l.d}
-                  className={`cx-link ${l.active ? 'active' : ''}`}
-                  style={{ stroke: l.color }}
-                  markerEnd={l.arrow ? `url(#cx-arrow-${l.index % ACCENTS.length})` : undefined}
-                />
-                {l.active ? (
-                  <circle className="cx-packet" r="2.6" style={{ fill: l.color }}>
-                    <animateMotion dur="2.2s" repeatCount="indefinite" path={l.d} />
-                  </circle>
-                ) : null}
-              </g>
-            ))}
-          </svg>
+      <div className="cx-flow">
+        {stages.map((stage, i) => (
+          <section key={stage.key} className="cx-stage" aria-label={stage.title}>
+            {i > 0 ? (
+              <div className={`cx-arrow ${anyRunning(stage) || anyRunning(stages[i - 1]) ? 'active' : ''}`} aria-hidden="true">
+                <span className="cx-arrow-label">{stage.inflow}</span>
+                <svg className="cx-arrow-line" width="16" height="28" viewBox="0 0 16 28">
+                  <path d="M 8 0 L 8 20" className="cx-link" />
+                  <path d="M 3.8 15.6 L 8 21.6 L 12.2 15.6" className="cx-link" />
+                </svg>
+              </div>
+            ) : null}
 
-          {plan.columns.map((col) => (
-            <div key={col.key} className="cx-col" style={{ left: col.x, width: col.w }} aria-label={col.title}>
-              <div className="cx-col-head">
-                <span className="cx-col-title">{col.title}</span>
-                <span className="cx-col-count">{col.count}</span>
-              </div>
-              <div className="cx-col-body">
-                {col.cards.map((c) =>
-                  c.seat ? (
-                    <SeatCard
-                      key={c.key}
-                      seat={c.seat}
-                      height={c.h}
-                      now={now}
-                      selected={selection?.kind === 'participant' && selection.id === (c.seat as Seat).participant.id}
-                      onSelect={() => onSelect({ kind: 'participant', id: (c.seat as Seat).participant.id })}
-                    />
-                  ) : (
-                    <div key={c.key} className={`cx-card plain ${c.tone ?? ''}`} style={{ height: c.h }}>
-                      <span className="cx-card-rail" style={{ background: c.accent ?? 'var(--line-3)' }} />
-                      <span className="cx-card-top">
-                        <span className="cx-avatar" style={{ background: c.accentSoft ?? 'var(--surface-2)', color: c.accent ?? 'var(--text-2)' }}>
-                          {c.glyph}
-                        </span>
-                        <span className="cx-card-id">
-                          <b>{c.title}</b>
-                          <em title={c.sub}>{c.sub}</em>
-                        </span>
-                        {c.tone ? (
-                          <span className={`cx-state ${c.tone}`}>
-                            <span className={`cx-dot ${c.tone}`} />
-                            {c.tag}
-                          </span>
-                        ) : null}
+            <header className="cx-stage-head">
+              <span className="cx-stage-title">{stage.title}</span>
+              <span className="cx-stage-count">{stage.cards.length}</span>
+            </header>
+
+            <div className="cx-stage-body">
+              {stage.cards.map((c) =>
+                c.seat ? (
+                  <SeatCard
+                    key={c.key}
+                    seat={c.seat}
+                    now={now}
+                    selected={selection?.kind === 'participant' && selection.id === (c.seat as Seat).participant.id}
+                    onSelect={() => onSelect({ kind: 'participant', id: (c.seat as Seat).participant.id })}
+                  />
+                ) : (
+                  <div key={c.key} className={`cx-card plain ${c.tone ?? ''}`}>
+                    <span className="cx-card-rail" style={{ background: c.accent ?? 'var(--line-3)' }} />
+                    <span className="cx-card-top">
+                      <span className="cx-avatar" style={{ background: c.accentSoft ?? 'var(--surface-2)', color: c.accent ?? 'var(--text-2)' }}>
+                        {c.glyph}
                       </span>
-                      {c.meta ? <span className="cx-card-meta">{c.meta}</span> : null}
-                    </div>
-                  ),
-                )}
-              </div>
+                      <span className="cx-card-id">
+                        <b>{c.title}</b>
+                        <em title={c.sub}>{c.sub}</em>
+                      </span>
+                      {c.tone ? (
+                        <span className={`cx-state ${c.tone}`}>
+                          <span className={`cx-dot ${c.tone}`} />
+                          {c.tag}
+                        </span>
+                      ) : null}
+                    </span>
+                    {c.meta ? <span className="cx-card-meta">{c.meta}</span> : null}
+                  </div>
+                ),
+              )}
             </div>
-          ))}
-        </div>
+          </section>
+        ))}
       </div>
 
       <div className="cx-legend">
@@ -254,13 +213,11 @@ export function PhaseStepper({ phase, lifecycle }: { phase: TaskPhase; lifecycle
 
 function SeatCard({
   seat,
-  height,
   now,
   selected,
   onSelect,
 }: {
   seat: Seat;
-  height: number;
   now: number;
   selected: boolean;
   onSelect: () => void;
@@ -274,7 +231,6 @@ function SeatCard({
       type="button"
       data-seat={seat.participant.id}
       className={`cx-card ${seat.tone} ${seat.root ? 'root' : ''} ${selected ? 'selected' : ''}`}
-      style={{ height }}
       onClick={onSelect}
       aria-pressed={selected}
       aria-label={`${seat.name} ${seat.roleLabel} ${seat.stateLabel} ${seat.doing}`}
@@ -339,7 +295,6 @@ function shortAgo(iso: string, now: number): string {
 interface CardModel {
   key: string;
   seat: Seat | null;
-  h: number;
   title?: string;
   sub?: string;
   meta?: string;
@@ -350,61 +305,35 @@ interface CardModel {
   accentSoft?: string;
 }
 
-interface Column {
+interface Stage {
   key: string;
   title: string;
-  count: number;
-  x: number;
-  w: number;
   cards: CardModel[];
-}
-
-interface LinkPath {
-  key: string;
-  d: string;
-  color: string;
-  index: number;
-  active: boolean;
-  arrow: boolean;
-}
-
-interface Plan {
-  w: number;
-  h: number;
-  columns: Column[];
-  links: LinkPath[];
-}
-
-interface Box {
-  key: string;
-  x: number;
-  y: number;
-  w: number;
-  h: number;
+  /** 从上一条阶段流到这一段的动作名, 画在阶段之间的空隙里 */
+  inflow: string;
 }
 
 /**
- * 并列列布局(参考 Lancer 的编排画布):
- * 主控/规划 → 执行者 → 审核席位 → 交付物 各占一列, 列内卡片自上而下堆叠,
- * 连线只在列间的竖直空隙(gutter)里走, 因此天然不会压到任何卡片。
+ * 竖向阶段布局: 主控/规划 → 执行者 → 审核席位 → 交付, 阶段自上而下排列;
+ * 阶段内部用网格自动换行(多执行者/多轮返工只会让阶段变高, 不会横向溢出),
+ * 整块画布纵向滚动, 连线只画在阶段之间的空隙里, 因此不会压住任何卡片。
  */
-function buildPlan(detail: TaskDetail, seats: Seat[], width: number): Plan {
+function buildStages(detail: TaskDetail, seats: Seat[]): Stage[] {
   const lead = seats.find((s) => s.root) ?? null;
   const workers = seats.filter((s) => !s.root && s.participant.role === 'worker');
   const strongs = seats.filter((s) => !s.root && s.participant.role === 'strong');
   const done = detail.task.lifecycle === 'completed';
   const hasDeliver = detail.artifacts.length > 0 || detail.reviewRounds.length > 0 || done || detail.task.phase === 'delivery';
 
-  const raw: { key: string; title: string; cards: CardModel[] }[] = [];
+  const stages: Stage[] = [];
 
   if (lead) {
-    const cards: CardModel[] = [{ key: `seat-${lead.key}`, seat: lead, h: 132 }];
+    const cards: CardModel[] = [{ key: `seat-${lead.key}`, seat: lead }];
     if (detail.plan) {
       const planLive = detail.task.lifecycle === 'awaiting_plan_approval' ? 'wait' : detail.plan.status === 'approved' ? 'ok' : 'idle';
       cards.push({
         key: 'plan-card',
         seat: null,
-        h: 96,
         title: `计划 v${detail.plan.number}`,
         sub: `${detail.plan.content.workItems.length} 个工作项 · ${detail.plan.content.deliverables.length} 份交付物`,
         meta: `哈希 ${detail.plan.contentHash.slice(0, 10)} · ${planLive === 'wait' ? '待你确认' : planLive === 'ok' ? '已批准' : detail.plan.status}`,
@@ -415,34 +344,36 @@ function buildPlan(detail: TaskDetail, seats: Seat[], width: number): Plan {
         accentSoft: 'var(--accent-soft)',
       });
     }
-    raw.push({ key: 'plan', title: '主控 / 规划', cards });
+    stages.push({ key: 'plan', title: '主控 / 规划', cards, inflow: '' });
   }
 
   if (workers.length > 0) {
-    raw.push({
+    stages.push({
       key: 'exec',
       title: '执行者',
-      cards: workers.map((w) => ({ key: `seat-${w.key}`, seat: w, h: workerCardHeight(w) })),
+      cards: workers.map((w) => ({ key: `seat-${w.key}`, seat: w })),
+      inflow: '派发',
     });
   }
 
   if (strongs.length > 0) {
-    raw.push({
+    stages.push({
       key: 'review',
       title: '审核席位',
-      cards: strongs.map((s) => ({ key: `seat-${s.key}`, seat: s, h: 132 })),
+      cards: strongs.map((s) => ({ key: `seat-${s.key}`, seat: s })),
+      inflow: '提交审核',
     });
   }
 
   if (hasDeliver) {
-    raw.push({
+    stages.push({
       key: 'deliver',
       title: '交付',
+      inflow: '交付',
       cards: [
         {
           key: 'deliver-card',
           seat: null,
-          h: 104,
           title: '交付物',
           sub: `${detail.artifacts.length} 个登记文件 · ${detail.reviewRounds.length} 轮审核`,
           meta: `工作项 ${detail.workItems.filter((w) => w.state === 'accepted').length}/${detail.workItems.length} 已接受 · 交付说明见「产物」页签`,
@@ -456,80 +387,11 @@ function buildPlan(detail: TaskDetail, seats: Seat[], width: number): Plan {
     });
   }
 
-  const n = Math.max(1, raw.length);
-  const gutter = n >= 4 ? (width < 820 ? 38 : 48) : n > 2 ? 60 : 78;
-  const available = width - PAD * 2 - gutter * (n - 1);
-  const minW = width < 820 ? 138 : 168;
-  const colW = Math.max(minW, Math.min(300, Math.floor(available / n)));
-  const spanW = n * colW + (n - 1) * gutter;
-  const planeW = Math.max(width, spanW + PAD * 2);
-  const left = Math.round((planeW - spanW) / 2);
-
-  const columns: Column[] = raw.map((c, i) => ({
-    key: c.key,
-    title: c.title,
-    count: c.cards.length,
-    x: left + i * (colW + gutter),
-    w: colW,
-    cards: c.cards,
-  }));
-
-  // 卡片纵向堆叠, 记下每张卡的中心 y 供连线使用
-  const boxes = new Map<string, Box>();
-  const headH = 26;
-  let maxBottom = 0;
-  for (const col of columns) {
-    let y = headH + 6;
-    for (const card of col.cards) {
-      const h = Math.min(card.h, 240);
-      const x = col.x;
-      boxes.set(card.key, { key: card.key, x, y, w: colW, h });
-      y += h + 12;
-    }
-    maxBottom = Math.max(maxBottom, y);
-  }
-
-  // 连线只画在列间空隙: 来源卡的右边缘连到目标卡的左边缘, 控制点取空隙中线,
-  // 曲线整体停留在两列之间, 因此不会压到任何卡片, 也不需要绕行。
-  const links: LinkPath[] = [];
-  for (let i = 0; i < columns.length - 1; i += 1) {
-    const fromCol = columns[i];
-    const toCol = columns[i + 1];
-    if (fromCol.cards.length === 0 || toCol.cards.length === 0) continue;
-    const pairs = fromCol.cards.length * toCol.cards.length;
-    const targets = pairs > 9 ? [toCol.cards[0]] : toCol.cards;
-    // 计划卡是信息卡, 不作为连线起点, 否则同一列会射出双倍曲线。
-    const seatCards = fromCol.cards.filter((c) => c.seat !== null);
-    const sources = seatCards.length > 0 ? seatCards : fromCol.cards;
-    sources.forEach((src, si) => {
-      const sb = boxes.get(src.key);
-      if (!sb) return;
-      targets.forEach((dst, di) => {
-        const tb = boxes.get(dst.key);
-        if (!tb) return;
-        const x1 = sb.x + sb.w;
-        const y1 = sb.y + Math.min(sb.h, 56) / 2 + 8;
-        const x2 = tb.x - 2;
-        const y2 = tb.y + Math.min(tb.h, 56) / 2 + 8;
-        const mid = (x1 + x2) / 2;
-        links.push({
-          key: `l-${fromCol.key}-${src.key}-${dst.key}`,
-          d: `M ${x1} ${y1} C ${mid} ${y1}, ${mid} ${y2}, ${x2} ${y2}`,
-          color: src.seat?.accent ?? src.accent ?? 'var(--line-3)',
-          index: si + di,
-          active: (src.seat?.tone ?? src.tone) === 'run' || (dst.seat?.tone ?? dst.tone) === 'run',
-          arrow: true,
-        });
-      });
-    });
-  }
-
-  return { w: planeW, h: maxBottom + 12, columns, links };
+  return stages;
 }
 
-function workerCardHeight(seat: Seat): number {
-  const rows = Math.min(3, seat.works.length);
-  return 116 + rows * WORK_LINE + (rows > 0 ? 8 : 0);
+function anyRunning(stage: Stage): boolean {
+  return stage.cards.some((c) => (c.seat?.tone ?? c.tone) === 'run');
 }
 
 /* ------------------------------ 数据推导 ------------------------------ */
