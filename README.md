@@ -295,3 +295,11 @@ docs               进度、决策(ADR)、兼容性、验收矩阵与证据、�
 - `node:sqlite` 在 Node 24 仍为实验 API, 跨大版本升级需回归。
 - 真实 harness 的审批请求会原样透传到界面; 若关闭窗口, 待审批请求会在重启后标为 `expired`。
 - 第三方许可与再分发要求见 `THIRD-PARTY-NOTICES.md`。
+
+### 心跳与 Content-Type(实现注记)
+
+关闭网页能停掉后台服务, 靠的是页面每 2 秒一次的 `POST /api/runtime/heartbeat`:
+
+- 页面关闭时先发 `sendBeacon('/api/runtime/close-intent')`, 服务等 2.5 秒宽限(刷新不算关闭), 到期优雅关停;
+- 兜底: 页面连着过但心跳停了 12 秒, 也会关停;
+- **空体 POST 不能要求 Content-Type** —— 浏览器的心跳不带 `Content-Type`, 如果服务端一律要求 `application/json`, 心跳会全部 415, 服务会以为"页面从没连上", 于是关页面也不退出。这个问题真实发生过, 现在有回归测试锁住(`tests/http.test.ts` 的"心跳"用例)。

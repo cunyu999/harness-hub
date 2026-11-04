@@ -384,3 +384,42 @@ test('PROFILE: 可新增/删除执行配置; 被任务引用过的只能停用',
 test.after(() => {
   rmSync(baseRoot, { recursive: true, force: true });
 });
+
+test('心跳: 空体 POST 不需要 Content-Type(否则页面心跳永远 415)', async () => {
+  const cfg = loadConfig({ root: process.cwd(), port: 0, host: '127.0.0.1' });
+  const db = new Db(join(cfg.dataDir, `hb-${process.pid}.db`));
+  const repo = new Repo(db);
+  const engine = new Engine(repo, { paths: { root: cfg.root, dataDir: cfg.dataDir }, adapters: { mock: new MockAdapter() } });
+  const runtime = {
+    noteHeartbeat: () => undefined,
+    requestClose: () => undefined,
+    status: () => ({
+      exitOnUiClose: true,
+      lastHeartbeatAgoMs: 0,
+      pendingStopInMs: null,
+      activeSessions: 0,
+      stopped: false,
+      pageSeen: true,
+    }),
+  };
+  const api = new ApiServer(repo, engine, cfg, { mock: new MockAdapter() }, runtime as never);
+  await api.start();
+  const addr = api.listenAddress();
+  assert.ok(addr, '服务应已监听');
+  try {
+    // 浏览器的心跳是"无请求体、无 Content-Type"的 POST, 必须被接受
+    const res = await fetch(`http://127.0.0.1:${addr.port}/api/runtime/heartbeat`, { method: 'POST' });
+    assert.equal(res.status, 200);
+    // 但带体的写请求仍然必须声明 JSON
+    const bad = await fetch(`http://127.0.0.1:${addr.port}/api/runtime/heartbeat`, {
+      method: 'POST',
+      headers: { 'content-type': 'text/plain' },
+      body: 'x',
+    });
+    assert.equal(bad.status, 415);
+  } finally {
+    await api.stop();
+    await engine.shutdown();
+    db.close();
+  }
+});

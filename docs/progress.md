@@ -219,3 +219,10 @@
 - 对话页重做: 可选对话对象(主控或任一席位)、可就地改该席位的工作目录与会话权限、可只看与它的对话; 画布卡片详情里加「和它对话」。
 - 新增 `GET/PATCH /api/tasks/:id/participants/:participantId`; `POST /messages` 支持 `participantId`。
 - 修掉两个实现缺陷: `mapParticipant` 漏读新列导致 API 看不到沙箱/工作区; mock 适配器把产物写到了席位 cwd 而不是 `deliverables`。
+
+## 修: 关掉网页后后台没退出
+
+- 症状: 关掉标签页后服务仍在, 重新打开网址还能进。
+- 根因: 页面心跳是无请求体的 `POST /api/runtime/heartbeat`, 服务端的写请求校验要求 `Content-Type: application/json`, 于是心跳全部 415; `pageSeen` 一直是 false, 关闭意图与空闲兜底都失效。
+- 修复: 只有"确实带请求体"的写请求才要求 JSON; 前端心跳显式带 `{}`; 新增回归测试(空体 POST 200, 带体但非 JSON 仍 415)。
+- 实测: 打开页面 → `/api/runtime` 显示 `pageSeen:true`; 关闭页面 → 服务 2.5 秒后退出(脚本 `.local/tmp/verify-close.mjs`)。

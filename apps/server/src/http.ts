@@ -179,9 +179,11 @@ export class ApiServer {
         return;
       }
       const ct = (req.headers['content-type'] ?? '').toLowerCase();
-      // DELETE 通常没有请求体(浏览器不会为它自动加 Content-Type), 只在确实带体时才要求 JSON。
+      // 只有"确实带了请求体"的写请求才要求 application/json。
+      // DELETE 通常没有体; 心跳 / 关闭意图这类空体 POST 也没有 —— 之前一律要求 Content-Type,
+      // 导致浏览器的心跳请求全部 415, 服务以为页面从没连上, 于是关页面也不会退出。
       const hasBody = Number(req.headers['content-length'] ?? '0') > 0 || req.headers['transfer-encoding'] !== undefined;
-      const needsJson = req.method === 'POST' || req.method === 'PATCH' || (req.method === 'DELETE' && hasBody);
+      const needsJson = hasBody && (req.method === 'POST' || req.method === 'PATCH' || req.method === 'DELETE');
       if (needsJson) {
         if (!ct.includes('application/json')) {
           this.json(res, 415, { code: 'unsupported_media_type', message: '写请求必须使用 application/json', correlationId });
