@@ -5,16 +5,102 @@ import type { GraphSelection } from './CollabGraph';
 import { ACTIVITY_LABEL, ITEM_LABEL, ITEM_TONE, ago, clock, shortId } from '../lib/format';
 import type { EventEnvelope } from '../../../../packages/contracts/src/events';
 
+export interface AnchorRect {
+  top: number;
+  left: number;
+  width: number;
+  height: number;
+}
+
+const DETAIL_W = 400;
+const GAP = 12;
+const EDGE = 12;
+
+/**
+ * 详情面板贴着被点的那张卡片放: 优先放右侧, 右边放不下就放左侧, 都不行再夹到视口内,
+ * 但始终保持与卡片至少 GAP 的间距, 所以不会盖住卡片本身。
+ */
+export function anchorStyle(
+  anchor: AnchorRect | null | undefined,
+  bounds?: { left: number; right: number; top: number; bottom: number } | null,
+): React.CSSProperties {
+  if (!anchor) return {};
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  // 有画布边界时就把面板限制在画布内, 免得盖住右边的计划/对话停靠栏
+  const minLeft = Math.max(EDGE, (bounds?.left ?? 0) + EDGE);
+  const maxRight = Math.min(vw - EDGE, (bounds?.right ?? vw) - EDGE);
+  const minTop = Math.max(EDGE, (bounds?.top ?? 0) + EDGE);
+  const maxBottom = Math.min(vh - EDGE, (bounds?.bottom ?? vh) - EDGE);
+
+  const room = Math.max(240, maxRight - minLeft);
+  const width = Math.min(DETAIL_W, room);
+  const right = anchor.left + anchor.width;
+  const bottomOfCard = anchor.top + anchor.height;
+
+  // 只放在"放得下"的一侧; 两侧都放不下就挪到卡片下方/上方, 绝不压住卡片本身
+  const needRight = GAP + width;
+  const availRight = maxRight - right;
+  const availLeft = anchor.left - minLeft;
+  const availBelow = maxBottom - bottomOfCard;
+  const availAbove = anchor.top - minTop;
+  const H = Math.min(vh * 0.6, 420);
+
+  let left: number;
+  let top: number;
+  const fitsRight = availRight >= needRight;
+  const fitsLeft = availLeft >= GAP + width;
+
+  if (fitsRight) {
+    left = right + GAP;
+    top = anchor.top - 4;
+  } else if (fitsLeft) {
+    left = anchor.left - GAP - width;
+    top = anchor.top - 4;
+  } else if (availBelow >= 180 || availBelow >= availAbove) {
+    left = Math.max(minLeft, Math.min(anchor.left, maxRight - width));
+    top = bottomOfCard + GAP;
+  } else {
+    left = Math.max(minLeft, Math.min(anchor.left, maxRight - width));
+    top = Math.max(minTop, anchor.top - GAP - H);
+  }
+
+  left = Math.max(minLeft, Math.min(left, maxRight - width));
+  top = Math.max(minTop, Math.min(top, maxBottom - 200));
+  const maxHeight = Math.max(220, Math.min(maxBottom - top, vh * 0.72));
+  return { position: 'fixed', top, left, width, maxHeight, right: 'auto', bottom: 'auto' };
+}
+
+/** 会话里的模型/推理有时是 harness 报上来的数组(甚至是 JSON 字符串), 直接渲染会变成 ["a","b"]。 */
+function readable(value: unknown): string {
+  if (value === null || value === undefined || value === '') return '—';
+  if (Array.isArray(value)) return value.map((v) => String(v)).join(' · ');
+  const text = String(value);
+  if (text.startsWith('[')) {
+    try {
+      const parsed = JSON.parse(text) as unknown;
+      if (Array.isArray(parsed)) return parsed.map((v) => String(v)).join(' · ');
+    } catch {
+      /* 不是 JSON 就原样显示 */
+    }
+  }
+  return text;
+}
+
 export function NodeDetail({
   detail,
   selection,
   events,
+  anchor,
+  anchorBounds,
   onClose,
   onChanged,
 }: {
   detail: TaskDetail;
   selection: GraphSelection;
   events: EventEnvelope[];
+  anchor?: AnchorRect | null;
+  anchorBounds?: { left: number; right: number; top: number; bottom: number } | null;
   onClose: () => void;
   onChanged: () => void;
 }) {
@@ -30,7 +116,7 @@ export function NodeDetail({
 
   if (selection.kind === 'artifact') {
     return (
-      <div className="detail">
+      <div className="detail" style={anchorStyle(anchor, anchorBounds)}>
         <h4>
           交付物
           <button className="btn ghost sm" onClick={onClose}>
@@ -56,7 +142,7 @@ export function NodeDetail({
 
   if (!participant) {
     return (
-      <div className="detail">
+      <div className="detail" style={anchorStyle(anchor, anchorBounds)}>
         <h4>
           节点
           <button className="btn ghost sm" onClick={onClose}>
@@ -88,7 +174,7 @@ export function NodeDetail({
   };
 
   return (
-    <div className="detail">
+    <div className="detail" style={anchorStyle(anchor, anchorBounds)}>
       <h4>
         <span>
           {participant.displayName}{' '}
@@ -105,9 +191,9 @@ export function NodeDetail({
         <dt>配置</dt>
         <dd>{detail.profiles.find((p) => p.id === participant.profileId)?.adapterId ?? '—'}</dd>
         <dt>观测模型</dt>
-        <dd>{live[0]?.observedModel ?? sessions[0]?.observedModel ?? '—'}</dd>
+        <dd>{readable(live[0]?.observedModel ?? sessions[0]?.observedModel)}</dd>
         <dt>推理配置</dt>
-        <dd>{live[0]?.observedReasoning ?? sessions[0]?.observedReasoning ?? '—'}</dd>
+        <dd>{readable(live[0]?.observedReasoning ?? sessions[0]?.observedReasoning)}</dd>
         <dt>连接</dt>
         <dd>{live.length === 0 ? '无活动会话' : live.map((s) => s.connectionState).join(', ')}</dd>
         <dt>进程</dt>

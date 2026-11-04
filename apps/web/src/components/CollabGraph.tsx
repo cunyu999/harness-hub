@@ -272,6 +272,7 @@ function SeatCard({
   return (
     <button
       type="button"
+      data-seat={seat.participant.id}
       className={`cx-card ${seat.tone} ${seat.root ? 'root' : ''} ${selected ? 'selected' : ''}`}
       style={{ height }}
       onClick={onSelect}

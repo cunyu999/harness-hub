@@ -61,6 +61,7 @@
   `docs/evidence/model-override-2026-11-04.json`, 结论写进 `docs/compatibility.md` 与 web 面板字段提示。
   同时收紧 live 探针: 只有真实回合成功才算通过(此前 Claude/Codex 无论成败都报 `ok:true`), 失败时带子进程 stderr 摘要。
 
+- 节点详情面板改为**贴着被点的卡片**浮动(优先右侧, 放不下换左侧, 两侧都不够就放到卡片下方/上方), 并被限制在画布区域内, 不再固定停在右下角挡住卡片。
 - 不再内置 harness 副本(移除了 579 个包), 执行入口只解析本机安装; 入口解析失败会变成 `ok:false` 的探针结果而不是 500。
 - 执行入口不再绑定项目内副本: 新增 `packages/adapters/src/exec.ts`(绝对路径 / PATH 命令名 / 留空自动探测;
   `.js`→node、`.exe`→直接、`.cmd|.bat`→cmd.exe、`.ps1`→powershell; Claude 从 `.cmd` 解析真实 exe)。
