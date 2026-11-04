@@ -21,6 +21,7 @@ import {
   type TurnRequest,
 } from './types.js';
 import { newId } from '../../core/src/util.js';
+import { resolveClaudeBinary } from './exec.js';
 
 export interface ClaudeAdapterOptions {
   /** 项目内 claude 原生可执行文件路径 */
@@ -46,16 +47,24 @@ export class ClaudeAdapter implements HarnessAdapter {
     return path.join(this.opts.configRoot, `claude-${profile.id}`);
   }
 
+  /**
+   * Claude Code 的 SDK 需要真正的可执行文件, 不能是 .cmd/.ps1 垫片。
+   * 这里允许执行配置指向本机已装的 claude(.cmd 会自动解析出真实 exe), 留空则先找 PATH, 再退回项目内安装的版本。
+   */
+  private resolveExe(profile: ExecutionProfile): { executable: string; source: 'profile' | 'path' | 'vendored'; note?: string } {
+    return resolveClaudeBinary(profile.executableRef, this.opts.executable);
+  }
+
   private executableFor(profile: ExecutionProfile): string {
-    const ref = profile.executableRef?.trim();
-    if (ref && ref.length > 0) return ref;
-    return this.opts.executable;
+    return this.resolveExe(profile).executable;
   }
 
   async probe(profile: ExecutionProfile, mode: 'inspect' | 'live'): Promise<ProbeResult> {
     const checkedAt = new Date().toISOString();
-    const exe = this.executableFor(profile);
+    const resolved = this.resolveExe(profile);
+    const exe = resolved.executable;
     const warnings: string[] = [];
+    if (resolved.note) warnings.push(resolved.note);
     let version: string | null = null;
     let versionDetail = '';
     try {

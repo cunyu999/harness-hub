@@ -86,6 +86,11 @@ npm run dev:web                              # 前端 4311, 代理 /api 到 4310
 
 同一个 harness 的多份配置各有自己的私有 home 与并发组, 可以分别给"主控""审查""执行"用。
 
+**用本机已装的 harness 也可以**: 「可执行入口」既可以填项目内的入口(默认显示在占位符里), 也可以填
+`codex` / `claude` / 自己安装的绝对路径。**留空则自动探测**: 先找 PATH 里的同名命令, 找不到才用项目内
+`node_modules` 里的那份。Windows 的 `.cmd` 垫片会被解析出真实可执行文件(Claude Code 必须指向真实 `.exe`),
+所以不会因为"多装了一份"而强迫你换版本, 也不会改动你本机的任何文件。
+
 **关于模型与推理强度**: 面板里的这两项只对**本程序发起的会话**做覆盖, 不会改写 harness 的配置文件
 (Codex `config.toml`、Claude `settings.json`/cc-switch、DSH `cordis.yml` 仍归你自己管)。留空即用 harness 自己的配置。
 实测结论(详见 `docs/compatibility.md` 与 `docs/evidence/model-override-2026-11-04.json`):

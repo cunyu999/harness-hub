@@ -20,6 +20,7 @@ import {
   type TurnRequest,
 } from './types.js';
 import { newId, sha256Text } from '../../core/src/util.js';
+import { resolveLauncher } from './exec.js';
 
 export interface CodexAdapterOptions {
   /** codex 可执行入口 (项目内 node_modules 中的 codex.js 或 codex.exe) */
@@ -51,12 +52,10 @@ export class CodexAdapter implements HarnessAdapter {
     return path.join(this.opts.homeRoot, `codex-${profile.id}`);
   }
 
-  private spawnArgs(profile: ExecutionProfile): { command: string; args: string[] } {
-    const entry = profile.executableRef?.trim() || this.opts.entry;
-    if (entry.toLowerCase().endsWith('.js') || entry.toLowerCase().endsWith('.mjs')) {
-      return { command: process.execPath, args: [entry, 'app-server'] };
-    }
-    return { command: entry, args: ['app-server'] };
+  private spawnArgs(profile: ExecutionProfile): { command: string; args: string[]; entry: string } {
+    // 支持三种来源: 项目内 js 入口 / 本机已安装的 codex(PATH 或 .cmd/.ps1/.exe) / 留空自动探测
+    const launcher = resolveLauncher(profile.executableRef, { name: 'codex', path: this.opts.entry });
+    return { command: launcher.command, args: [...launcher.prefix, 'app-server'], entry: launcher.entry };
   }
 
   private childEnv(profile: ExecutionProfile, extra: Record<string, string>): Record<string, string> {
@@ -79,7 +78,7 @@ export class CodexAdapter implements HarnessAdapter {
   async probe(profile: ExecutionProfile, mode: 'inspect' | 'live'): Promise<ProbeResult> {
     const checkedAt = new Date().toISOString();
     const warnings: string[] = [];
-    const { command, args } = this.spawnArgs(profile);
+    const { command, args, entry } = this.spawnArgs(profile);
     const child = spawn(command, args, {
       cwd: process.cwd(),
       env: this.childEnv(profile, {}),
@@ -128,7 +127,7 @@ export class CodexAdapter implements HarnessAdapter {
         ok: liveOk,
         mode,
         checkedAt,
-        executableResolved: command,
+        executableResolved: entry,
         version,
         protocol: 'codex app-server v2 (JSON-RPC over stdio)',
         detail: liveOk ? `handshake 成功; ${liveDetail}` : `handshake 成功; ${liveDetail}: ${liveError.slice(0, 160)}`,

@@ -55,7 +55,7 @@ export type ProfileCreateInput = z.infer<typeof ProfileCreateSchema>;
 
 export const ProfilePatchSchema = z.object({
   name: z.string().min(1).max(120).optional(),
-  executableRef: z.string().min(1).max(400).optional(),
+  executableRef: z.string().max(400).optional(),
   configRefs: z.record(z.string(), z.string()).optional(),
   secretRefs: z.array(z.string()).optional(),
   requestedModel: z.string().max(200).nullable().optional(),

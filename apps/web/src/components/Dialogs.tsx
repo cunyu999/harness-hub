@@ -601,11 +601,11 @@ function parseEnv(text: string): Record<string, string> {
 function execHint(adapterId: string): string {
   switch (adapterId) {
     case 'codex':
-      return 'D:/1hobby/node_modules/@openai/codex/bin/codex.js';
+      return 'codex 或 C:/Users/你/AppData/Roaming/npm/codex.cmd(留空 = 自动探测)';
     case 'claude-code':
-      return 'D:/1hobby/node_modules/@anthropic-ai/claude-code/bin/claude.exe';
+      return 'claude 或 .../claude-code/bin/claude.exe(留空 = 自动探测)';
     case 'dsh':
-      return 'D:/1hobby/node_modules/@deepseek-ai/dsh/lib/bin.js';
+      return 'dsh 或 .../node_modules/@deepseek-ai/dsh/lib/bin.js(留空 = 自动探测)';
     default:
       return 'mock 适配器不需要可执行入口';
   }

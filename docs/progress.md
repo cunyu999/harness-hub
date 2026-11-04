@@ -61,7 +61,12 @@
   `docs/evidence/model-override-2026-11-04.json`, 结论写进 `docs/compatibility.md` 与 web 面板字段提示。
   同时收紧 live 探针: 只有真实回合成功才算通过(此前 Claude/Codex 无论成败都报 `ok:true`), 失败时带子进程 stderr 摘要。
 
-- 自动化测试 `tests/`: 31 项通过(`npm test`)。
+- 执行入口不再绑定项目内副本: 新增 `packages/adapters/src/exec.ts`(绝对路径 / PATH 命令名 / 留空自动探测;
+  `.js`→node、`.exe`→直接、`.cmd|.bat`→cmd.exe、`.ps1`→powershell; Claude 从 `.cmd` 解析真实 exe)。
+  本机实测: `codex` → 全局 0.166.0 握手通过; `claude` → 全局 2.1.318 live 通过; DSH 无全局安装 → 退回项目内。
+  `PATCH /api/profiles/:id` 允许把入口清空回到自动探测。
+
+- 自动化测试 `tests/`: 36 项通过(`npm test`)。
   - `tests/core.test.ts` 14 项: 路径安全、计划校验(强制全部强模型审核/越界拒绝/未选参与者报错/依赖环/数量上限)、
     调度(依赖就绪、并发上限、每配置串行、写入范围冲突、死锁判定)。
   - `tests/engine.mock.test.ts` 7 项: 单强模型全链路、双强模型讨论+交叉复核、同配置回合不重叠、

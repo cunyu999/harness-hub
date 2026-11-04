@@ -41,6 +41,22 @@
 
 live 探针的判定同时在这次核验中收紧: 只有**真实回合成功**才算 `ok`(Claude `result.subtype=success`、DSH `stopReason=end_turn`、Codex `model/list` 非空), 失败会带子进程 stderr 摘要, 不再一律报成功。
 
+### 可执行入口的解析顺序
+
+「执行配置 → 可执行入口」按下面的顺序解析, 因此**本机已经装好的 harness 可以直接用**, 不必依赖项目内副本:
+
+1. 填了绝对路径 → 直接用(会校验存在)。
+2. 填了命令名(如 `codex`) → 在 `PATH` 里按 `PATHEXT` 查找, 跳过同名的无扩展名 sh 脚本。
+3. 留空 → 先按适配器名在 `PATH` 找, 找不到才用项目内 `node_modules` 里的入口。
+
+包装细节: `.js/.mjs/.cjs` 用当前 Node 执行; `.cmd/.bat` 经 `cmd.exe /d /s /c` 执行; `.ps1` 经
+`powershell -NoProfile -ExecutionPolicy Bypass -File`; `.exe` 直接 spawn。Claude Code 的 SDK 需要真实
+可执行文件, 所以 `.cmd` 垫片会被解析出内部 `claude.exe`, 指向 `.js` 时会退回项目内安装的版本并给出警告。
+
+本机实测(2026-11-04): 入口填 `codex` → 解析到 `E:\nodejs\node_global\codex.cmd`, app-server 握手通过(0.166.0);
+入口填 `claude` → 解析到全局 `claude.exe`(2.1.318)并跑通 live 回合; DSH 本机没有全局安装, 自动退回项目内 0.2.1-rc.5。
+`tests/exec.test.ts` 覆盖了名字解析、js/exe 分支、留空回退与"入口不存在要报错"。
+
 ## 已知限制
 
 1. Codex Windows 沙箱: `windowsSandbox/readiness` 返回 `updateRequired`, 未以管理员完成准备时隔离较弱。

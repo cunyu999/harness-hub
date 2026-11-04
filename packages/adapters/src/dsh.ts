@@ -21,6 +21,7 @@ import {
   type TurnRequest,
 } from './types.js';
 import { newId, sha256Text } from '../../core/src/util.js';
+import { resolveLauncher } from './exec.js';
 
 export interface DshAdapterOptions {
   /** dsh CLI 入口 (项目内 node_modules/@deepseek-ai/dsh/lib/bin.js) */
@@ -49,12 +50,10 @@ export class DshAdapter implements HarnessAdapter {
     return path.join(this.opts.homeRoot, `dsh-${profile.id}`);
   }
 
-  private spawnSpec(profile: ExecutionProfile): { command: string; args: string[] } {
-    const entry = profile.executableRef?.trim() || this.opts.entry;
-    if (entry.toLowerCase().endsWith('.js') || entry.toLowerCase().endsWith('.mjs')) {
-      return { command: process.execPath, args: [entry, '--profile', 'acp'] };
-    }
-    return { command: entry, args: ['--profile', 'acp'] };
+  private spawnSpec(profile: ExecutionProfile): { command: string; args: string[]; entry: string } {
+    // 支持项目内 js 入口 / 本机已安装的 dsh(PATH 或 .cmd/.ps1/.exe) / 留空自动探测
+    const launcher = resolveLauncher(profile.executableRef, { name: 'dsh', path: this.opts.entry });
+    return { command: launcher.command, args: [...launcher.prefix, '--profile', 'acp'], entry: launcher.entry };
   }
 
   private childEnv(profile: ExecutionProfile, extra: Record<string, string>): Record<string, string> {
@@ -76,7 +75,7 @@ export class DshAdapter implements HarnessAdapter {
   async probe(profile: ExecutionProfile, mode: 'inspect' | 'live'): Promise<ProbeResult> {
     const checkedAt = new Date().toISOString();
     const warnings: string[] = [];
-    const { command, args } = this.spawnSpec(profile);
+    const { command, args, entry } = this.spawnSpec(profile);
     const child = spawn(command, args, {
       cwd: profile.workspaceRoot ?? process.cwd(),
       env: this.childEnv(profile, {}),
@@ -158,7 +157,7 @@ export class DshAdapter implements HarnessAdapter {
         ok: liveOk,
         mode,
         checkedAt,
-        executableResolved: command,
+        executableResolved: entry,
         version: null,
         protocol: `ACP over stdio (protocolVersion=${protocolVersion})`,
         detail: liveOk ? `握手成功; ${liveDetail}` : `握手成功; ${liveDetail}: ${liveErrors.join('; ').slice(0, 160)}`,
@@ -196,7 +195,7 @@ export class DshAdapter implements HarnessAdapter {
         ok: false,
         mode,
         checkedAt,
-        executableResolved: command,
+        executableResolved: entry,
         version: null,
         protocol: null,
         detail: `ACP 握手失败: ${(err as Error).message.slice(0, 300)}${stderr[0] ? `; stderr: ${stderr[0].slice(0, 200)}` : ''}`,
