@@ -2235,3 +2235,454 @@ a.link:hover {
   padding: 6px 8px;
   line-height: 1.5;
 }
+
+/* ---------------------- 协作画布(树形卡片 + 彩色曲线) ---------------------- */
+
+.cy {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  background: var(--bg);
+}
+
+.cy-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 20px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+  flex-wrap: wrap;
+}
+
+.cy-summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.cy-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 11px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+
+.cy-pill-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--text-3);
+}
+
+.cy-pill.live {
+  color: var(--accent-2);
+  border-color: rgba(47, 184, 166, 0.32);
+  background: rgba(47, 184, 166, 0.1);
+}
+
+.cy-pill.live .cy-pill-dot {
+  background: var(--accent-2);
+  animation: cy-breathe 2.4s ease-in-out infinite;
+}
+
+.cy-pill.wait {
+  color: var(--warn);
+  border-color: var(--warn-line);
+  background: var(--warn-soft);
+}
+
+.cy-pill.wait .cy-pill-dot {
+  background: var(--warn);
+}
+
+.cy-stat {
+  font-size: 11.5px;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+.cy-stat b {
+  color: var(--text);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 阶段步进 —— 沿用 svg 之前的 ol 结构 */
+.cy-steps {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  flex-wrap: wrap;
+}
+
+.cy-steps li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11.5px;
+  color: var(--text-3);
+}
+
+.cy-step-dot {
+  display: inline-grid;
+  place-items: center;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  border: 1px solid var(--line-2);
+  font-size: 9px;
+  line-height: 1;
+  color: #fff;
+}
+
+.cy-steps li.done .cy-step-dot {
+  border-color: var(--ok);
+  background: var(--ok);
+}
+
+.cy-steps li.now .cy-step-dot {
+  border-color: var(--accent);
+  background: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.cy-steps li.now .cy-step-label {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.cy-steps li.done .cy-step-label {
+  color: var(--text-2);
+}
+
+.cy-step-hold {
+  margin-left: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--warn-soft);
+  color: var(--warn);
+  font-size: 11px;
+}
+
+/* 画布 */
+.cy-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scrollbar-gutter: stable;
+}
+
+.cy-canvas {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 62px;
+  padding: 26px 20px 34px;
+  max-width: 1080px;
+  margin: 0 auto;
+}
+
+.cy-wire {
+  position: absolute;
+  inset: 0;
+  overflow: visible;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.cy-wire-path {
+  fill: none;
+  stroke-width: 1.3;
+  stroke-linecap: round;
+  opacity: 0.42;
+  transition: opacity 0.2s ease;
+}
+
+.cy-wire-glow {
+  fill: none;
+  stroke-width: 5;
+  opacity: 0.07;
+  stroke-linecap: round;
+}
+
+.cy-wire g.active .cy-wire-path {
+  opacity: 0.95;
+  stroke-width: 1.6;
+  animation: cy-dash 1.6s linear infinite;
+  stroke-dasharray: 5 5;
+}
+
+.cy-wire g.active .cy-wire-glow {
+  opacity: 0.2;
+}
+
+.cy-spark {
+  filter: drop-shadow(0 0 4px currentColor);
+}
+
+.cy-tier {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 18px;
+}
+
+/* 卡片 */
+.cy-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 252px;
+  padding: 13px 15px 11px;
+  border: 1px solid var(--line-2);
+  border-radius: 14px;
+  background: var(--surface);
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  box-shadow: 0 1px 2px rgba(16, 20, 32, 0.04);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+.cy-card:hover {
+  border-color: var(--line-3);
+  box-shadow: 0 4px 14px rgba(16, 20, 32, 0.07);
+}
+
+.cy-card.selected {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.cy-card.root {
+  width: 300px;
+}
+
+.cy-card.run {
+  border-color: rgba(47, 184, 166, 0.55);
+}
+
+.cy-card.bad {
+  border-color: rgba(242, 104, 95, 0.5);
+}
+
+.cy-card.wait {
+  border-color: var(--line-2);
+}
+
+.cy-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.cy-card-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: 0 0 8px;
+}
+
+.cy-card-head b {
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+  flex: 1;
+}
+
+.cy-now {
+  flex: 0 0 auto;
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid var(--line-2);
+  font-size: 10px;
+  color: var(--text-2);
+  background: var(--surface-2);
+}
+
+.cy-card-sub {
+  font-size: 11px;
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.cy-card-big {
+  margin-top: 2px;
+  font-size: 14.5px;
+  font-weight: 600;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cy-bar {
+  display: flex;
+  gap: 1px;
+  height: 4px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: var(--line);
+}
+
+.cy-bar > span {
+  display: block;
+  border-radius: 999px;
+  min-width: 3px;
+}
+
+.cy-card-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--text-3);
+  min-width: 0;
+}
+
+.cy-card-foot > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.cy-pct {
+  flex: 0 0 auto;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-3);
+}
+
+.cy-pct.on {
+  color: var(--ok);
+}
+
+/* 图例 */
+.cy-legend {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 9px 20px;
+  border-top: 1px solid var(--line);
+  background: var(--surface);
+  font-size: 11px;
+  color: var(--text-3);
+}
+
+.cy-key {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.cy-state-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--line-3);
+}
+
+.cy-state-dot.run {
+  background: var(--accent-2);
+  animation: cy-breathe 2.4s ease-in-out infinite;
+}
+
+.cy-state-dot.wait {
+  background: var(--warn);
+}
+
+.cy-state-dot.ok {
+  background: var(--ok);
+}
+
+.cy-state-dot.bad {
+  background: var(--bad);
+}
+
+.cy-state-dot.idle {
+  background: var(--line-3);
+}
+
+.cy-note {
+  margin-left: auto;
+  color: var(--text-3);
+}
+
+@keyframes cy-dash {
+  to {
+    stroke-dashoffset: -20;
+  }
+}
+
+@keyframes cy-breathe {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.4;
+  }
+}
+
+@media (max-width: 980px) {
+  .cy-canvas {
+    gap: 46px;
+    padding: 18px 12px 26px;
+  }
+
+  .cy-card {
+    width: 100%;
+    max-width: 320px;
+  }
+
+  .cy-card.root {
+    width: 100%;
+    max-width: 340px;
+  }
+
+  .cy-note {
+    margin-left: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cy-wire g.active .cy-wire-path,
+  .cy-pill.live .cy-pill-dot,
+  .cy-state-dot.run {
+    animation: none;
+  }
+
+  .cy-spark {
+    display: none;
+  }
+}

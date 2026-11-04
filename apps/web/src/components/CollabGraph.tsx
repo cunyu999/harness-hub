@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { TaskDetail } from '../api';
 import type { EventEnvelope } from '../../../../packages/contracts/src/events';
 import type { ManagedSession, Participant, RunAttempt, TaskPhase, WorkItem } from '../../../../packages/contracts/src/types';
-import { ITEM_LABEL, PHASE_LABEL, duration, initials } from '../lib/format';
+import { PHASE_LABEL, duration } from '../lib/format';
 
 export type GraphSelection =
   | { kind: 'participant'; id: string }
@@ -11,17 +11,16 @@ export type GraphSelection =
   | null;
 
 type Tone = 'run' | 'wait' | 'ok' | 'bad' | 'idle';
-type ItemState = keyof typeof ITEM_LABEL;
 
-/** 每个席位一个色相, 同时用于卡片左侧色条与它的连线; 状态色另行表达, 两者不混用。 */
+/** 每个席位一个色相, 连线与卡片圆点同色; 状态色另行表达, 两者不混用。 */
 const ACCENTS = ['#8b7bff', '#2fb8a6', '#d99435', '#5b8def', '#d4709d', '#4aa96c'];
 const ACCENT_SOFT = [
-  'rgba(139, 123, 255, .13)',
-  'rgba(47, 184, 166, .13)',
-  'rgba(217, 148, 53, .13)',
-  'rgba(91, 141, 239, .13)',
-  'rgba(212, 112, 157, .13)',
-  'rgba(74, 169, 108, .13)',
+  'rgba(139, 123, 255, .14)',
+  'rgba(47, 184, 166, .14)',
+  'rgba(217, 148, 53, .14)',
+  'rgba(91, 141, 239, .14)',
+  'rgba(212, 112, 157, .14)',
+  'rgba(74, 169, 108, .14)',
 ];
 
 const HARNESS_SHORT: Record<string, string> = {
@@ -33,8 +32,6 @@ const HARNESS_SHORT: Record<string, string> = {
 
 const PHASE_STEPS: TaskPhase[] = ['planning', 'discussion', 'execution', 'integration', 'verification', 'review', 'delivery'];
 
-const MAX_WORKS = 4;
-
 interface Seat {
   key: string;
   participant: Participant;
@@ -43,15 +40,11 @@ interface Seat {
   harness: string;
   model: string;
   accent: string;
-  accentSoft: string;
   tone: Tone;
   stateLabel: string;
-  doing: string;
   elapsedMs: number | null;
   works: WorkItem[];
-  item: WorkItem | null;
   session: ManagedSession | null;
-  attempt: RunAttempt | null;
   root: boolean;
 }
 
@@ -66,6 +59,28 @@ function useNow(active: boolean): number {
   return now;
 }
 
+interface NodeModel {
+  key: string;
+  kind: 'root' | 'seat' | 'plan' | 'delivery';
+  seat: Seat | null;
+  title: string;
+  sub: string;
+  big: string;
+  foot: string;
+  pct: number | null;
+  tone: Tone;
+  accent: string;
+  segments: { color: string; flex: number }[];
+  select?: 'plan' | 'delivery';
+}
+
+interface Wire {
+  key: string;
+  d: string;
+  color: string;
+  active: boolean;
+}
+
 export function CollabGraph({
   detail,
   events,
@@ -78,29 +93,72 @@ export function CollabGraph({
   onSelect: (s: GraphSelection) => void;
 }) {
   const seats = useMemo(() => buildSeats(detail, events), [detail, events]);
-  const stages = useMemo(() => buildStages(detail, seats), [detail, seats]);
-  const running = seats.some((s) => s.tone === 'run');
-  const now = useNow(running);
+  const running = seats.some((s) => s.tone === 'run' || s.tone === 'wait') === false ? false : seats.some((s) => s.tone === 'run');
+  const now = useNow(seats.some((s) => s.tone === 'run'));
+
+  const lead = useMemo(() => seats.find((s) => s.root) ?? null, [seats]);
+  const others = useMemo(() => seats.filter((s) => !s.root), [seats]);
+  const done = detail.task.lifecycle === 'completed';
+  const hasDeliver =
+    detail.artifacts.length > 0 || detail.reviewRounds.length > 0 || done || detail.task.phase === 'delivery';
 
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const [wires, setWires] = useState<Wire[]>([]);
-  const [wireBox, setWireBox] = useState({ w: 0, h: 0 });
+  const [box, setBox] = useState({ w: 0, h: 0 });
 
-  // 连线坐标只能量出来: 阶段内部是 CSS 网格自动换行, 不量就不知道卡片落在哪
   useLayoutEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const measure = () => {
       const cr = canvas.getBoundingClientRect();
-      const box = new Map<string, { x: number; y: number; w: number; h: number }>();
+      const pos = new Map<string, { x: number; y: number; w: number; h: number }>();
       canvas.querySelectorAll<HTMLElement>('[data-ck]').forEach((el) => {
         const key = el.dataset.ck;
         if (!key) return;
         const r = el.getBoundingClientRect();
-        box.set(key, { x: r.left - cr.left, y: r.top - cr.top, w: r.width, h: r.height });
+        pos.set(key, { x: r.left - cr.left, y: r.top - cr.top, w: r.width, h: r.height });
       });
-      setWires(buildWires(stages, box));
-      setWireBox({ w: canvas.scrollWidth, h: canvas.scrollHeight });
+
+      const out: Wire[] = [];
+      const fromKey = lead ? `seat-${lead.key}` : null;
+      const From = fromKey ? pos.get(fromKey) : null;
+      if (fromKey && From) {
+        others.forEach((s) => {
+          const P = pos.get(`seat-${s.key}`);
+          if (!P) return;
+          out.push({
+            key: `${fromKey}->seat-${s.key}`,
+            d: curve(From.x + From.w / 2, From.y + From.h, P.x + P.w / 2, P.y),
+            color: s.accent,
+            active: s.tone === 'run' || (lead?.tone ?? 'idle') === 'run',
+          });
+        });
+      }
+
+      if (hasDeliver) {
+        const D = pos.get('deliver-card');
+        if (D) {
+          others.forEach((s) => {
+            const P = pos.get(`seat-${s.key}`);
+            if (!P) return;
+            out.push({
+              key: `seat-${s.key}->deliver-card`,
+              d: curve(P.x + P.w / 2, P.y + P.h, D.x + D.w / 2, D.y),
+              color: s.accent,
+              active: s.tone === 'run',
+            });
+          });
+        }
+      }
+
+      setWires((prev) => {
+        const same =
+          prev.length === out.length &&
+          prev.every((p, i) => p.key === out[i].key && p.d === out[i].d && p.color === out[i].color && p.active === out[i].active);
+        return same ? prev : out;
+      });
+      const nextBox = { w: canvas.scrollWidth, h: canvas.scrollHeight };
+      setBox((prev) => (prev.w === nextBox.w && prev.h === nextBox.h ? prev : nextBox));
     };
     measure();
     const ro = new ResizeObserver(measure);
@@ -110,7 +168,7 @@ export function CollabGraph({
       ro.disconnect();
       window.removeEventListener('resize', measure);
     };
-  }, [stages]);
+  }, [seats, lead, others, hasDeliver]);
 
   const counts = {
     run: seats.filter((s) => s.tone === 'run').length,
@@ -120,153 +178,235 @@ export function CollabGraph({
     total: detail.workItems.length,
   };
 
+  const planNode: NodeModel | null = detail.plan
+    ? {
+        key: 'plan-card',
+        kind: 'plan',
+        seat: null,
+        title: `计划 v${detail.plan.number}`,
+        sub: `${detail.plan.content.workItems.length} 个工作项 · ${detail.plan.content.deliverables.length} 份交付物`,
+        big: detail.plan.contentHash.slice(0, 10),
+        foot:
+          detail.task.lifecycle === 'awaiting_plan_approval'
+            ? '等待你确认'
+            : detail.plan.status === 'approved'
+              ? '已批准'
+              : detail.plan.status,
+        pct: null,
+        tone: detail.task.lifecycle === 'awaiting_plan_approval' ? 'wait' : detail.plan.status === 'approved' ? 'ok' : 'idle',
+        accent: 'var(--accent)',
+        segments: [],
+        select: 'plan',
+      }
+    : null;
+
+  const deliverNode: NodeModel | null = hasDeliver
+    ? {
+        key: 'deliver-card',
+        kind: 'delivery',
+        seat: null,
+        title: '交付物',
+        sub: `${detail.artifacts.length} 个登记文件 · ${detail.reviewRounds.length} 轮审核`,
+        big: `工作项 ${counts.accepted}/${counts.total}`,
+        foot: done ? '已交付 · 见「产物」页签' : '收集中',
+        pct: counts.total > 0 ? Math.round((counts.accepted / counts.total) * 100) : null,
+        tone: done ? 'ok' : 'wait',
+        accent: 'var(--ok)',
+        segments: [],
+        select: 'delivery',
+      }
+    : null;
+
   return (
-    <div className="cx">
-      <div className="cx-head">
+    <div className="cy">
+      <div className="cy-head">
         <PhaseStepper phase={detail.task.phase} lifecycle={detail.task.lifecycle} />
-        <div className="cx-summary">
-          {detail.task.lifecycle === 'awaiting_plan_approval' && detail.plan ? (
-            <span className="cx-pill wait">
-              <span className="cx-dot" />
-              计划 v{detail.plan.number} 待确认
+        <div className="cy-summary">
+          {planNode && detail.task.lifecycle === 'awaiting_plan_approval' ? (
+            <span className="cy-pill wait">
+              <span className="cy-pill-dot" />
+              计划 v{detail.plan?.number} 待确认
             </span>
           ) : null}
-          <span className={`cx-pill ${running ? 'live' : ''}`}>
-            <span className="cx-dot" />
+          <span className={`cy-pill ${running ? 'live' : ''}`}>
+            <span className="cy-pill-dot" />
             {running ? '会话进行中' : '当前无运行会话'}
           </span>
-          <span className="cx-stat">
+          <span className="cy-stat">
             <b>{counts.run}</b> 运行
           </span>
-          <span className="cx-stat">
+          <span className="cy-stat">
             <b>{counts.queue}</b> 排队
           </span>
           {counts.review > 0 ? (
-            <span className="cx-stat">
+            <span className="cy-stat">
               <b>{counts.review}</b> 待审核
             </span>
           ) : null}
           {counts.total > 0 ? (
-            <span className="cx-stat">
+            <span className="cy-stat">
               <b>{counts.accepted}</b>/{counts.total} 已接受
             </span>
           ) : null}
         </div>
       </div>
 
-      <div className="cx-flow">
-        <div className="cx-canvas" ref={canvasRef}>
-          {wires.length > 0 && wireBox.w > 0 ? (
-            <svg
-              className="cx-wire"
-              width={wireBox.w}
-              height={wireBox.h}
-              viewBox={`0 0 ${wireBox.w} ${wireBox.h}`}
-              aria-hidden="true"
-            >
+      <div className="cy-scroll">
+        <div className="cy-canvas" ref={canvasRef}>
+          {box.w > 0 && wires.length > 0 ? (
+            <svg className="cy-wire" width={box.w} height={box.h} viewBox={`0 0 ${box.w} ${box.h}`} aria-hidden="true">
               {wires.map((w) => (
                 <g key={w.key} className={w.active ? 'active' : ''}>
-                  <path d={w.d} className="cx-wire-glow" style={{ stroke: w.color }} />
-                  <path d={w.d} className="cx-wire-path" style={{ stroke: w.color }} />
+                  <path d={w.d} className="cy-wire-glow" style={{ stroke: w.color }} />
+                  <path d={w.d} className="cy-wire-path" style={{ stroke: w.color }} />
                   {w.active ? (
-                    <circle r="2.6" className="cx-spark" style={{ fill: w.color }}>
-                      <animateMotion dur="2.8s" repeatCount="indefinite" path={w.d} />
+                    <circle r="2.4" className="cy-spark" style={{ fill: w.color }}>
+                      <animateMotion dur="2.6s" repeatCount="indefinite" path={w.d} />
                     </circle>
                   ) : null}
                 </g>
               ))}
             </svg>
           ) : null}
-        {stages.map((stage, i) => (
-          <section key={stage.key} className="cx-stage" aria-label={stage.title}>
-            {i > 0 ? (
-              <div className={`cx-arrow ${anyRunning(stage) || anyRunning(stages[i - 1]) ? 'active' : ''}`} aria-hidden="true">
-                <span className="cx-arrow-label">{stage.inflow}</span>
-              </div>
+
+          <div className="cy-tier cy-tier-root">
+            {lead ? (
+              <NodeCard
+                node={nodeOfSeat(lead)}
+                now={now}
+                selected={selection?.kind === 'participant' && selection.id === lead.participant.id}
+                onSelect={() => onSelect({ kind: 'participant', id: lead.participant.id })}
+              />
             ) : null}
+            {planNode ? (
+              <NodeCard
+                node={planNode}
+                now={now}
+                selected={selection?.kind === 'plan'}
+                onSelect={() => onSelect({ kind: 'plan' })}
+              />
+            ) : null}
+          </div>
 
-            <header className="cx-stage-head">
-              <span className="cx-stage-title">{stage.title}</span>
-              <span className="cx-stage-count">{stage.cards.length}</span>
-            </header>
-
-            <div className="cx-stage-body">
-              {stage.cards.map((c) =>
-                c.seat ? (
-                  <SeatCard
-                    key={c.key}
-                    ck={c.key}
-                    seat={c.seat}
-                    now={now}
-                    selected={selection?.kind === 'participant' && selection.id === (c.seat as Seat).participant.id}
-                    onSelect={() => onSelect({ kind: 'participant', id: (c.seat as Seat).participant.id })}
-                  />
-                ) : c.select ? (
-                  <button
-                    key={c.key}
-                    data-ck={c.key}
-                    type="button"
-                    className={`cx-card plain clickable ${c.tone ?? ''} ${selection?.kind === c.select ? 'selected' : ''}`}
-                    onClick={() => onSelect(c.select === 'plan' ? { kind: 'plan' } : { kind: 'delivery' })}
-                    aria-label={(c.title ?? '') + ' 详情'}
-                  >
-                    <span className="cx-card-rail" style={{ background: c.accent ?? 'var(--line-3)' }} />
-                    <span className="cx-card-top">
-                      <span className="cx-avatar" style={{ background: c.accentSoft ?? 'var(--surface-2)', color: c.accent ?? 'var(--text-2)' }}>
-                        {c.glyph}
-                      </span>
-                      <span className="cx-card-id">
-                        <b>{c.title}</b>
-                        <em title={c.sub}>{c.sub}</em>
-                      </span>
-                      {c.tone ? (
-                        <span className={`cx-state ${c.tone}`}>
-                          <span className={`cx-dot ${c.tone}`} />
-                          {c.tag}
-                        </span>
-                      ) : null}
-                    </span>
-                    {c.meta ? <span className="cx-card-meta">{c.meta}</span> : null}
-                    <span className="cx-card-more">查看详情 ›</span>
-                  </button>
-                ) : (
-                  <div key={c.key} data-ck={c.key} className={`cx-card plain ${c.tone ?? ''}`}>
-                    <span className="cx-card-rail" style={{ background: c.accent ?? 'var(--line-3)' }} />
-                    <span className="cx-card-top">
-                      <span className="cx-avatar" style={{ background: c.accentSoft ?? 'var(--surface-2)', color: c.accent ?? 'var(--text-2)' }}>
-                        {c.glyph}
-                      </span>
-                      <span className="cx-card-id">
-                        <b>{c.title}</b>
-                        <em title={c.sub}>{c.sub}</em>
-                      </span>
-                      {c.tone ? (
-                        <span className={`cx-state ${c.tone}`}>
-                          <span className={`cx-dot ${c.tone}`} />
-                          {c.tag}
-                        </span>
-                      ) : null}
-                    </span>
-                    {c.meta ? <span className="cx-card-meta">{c.meta}</span> : null}
-                  </div>
-                ),
-              )}
+          {others.length > 0 ? (
+            <div className="cy-tier cy-tier-seats">
+              {others.map((s) => (
+                <NodeCard
+                  key={s.key}
+                  node={nodeOfSeat(s)}
+                  now={now}
+                  selected={selection?.kind === 'participant' && selection.id === s.participant.id}
+                  onSelect={() => onSelect({ kind: 'participant', id: s.participant.id })}
+                />
+              ))}
             </div>
-          </section>
-        ))}
+          ) : null}
+
+          {deliverNode ? (
+            <div className="cy-tier cy-tier-deliver">
+              <NodeCard
+                node={deliverNode}
+                now={now}
+                selected={selection?.kind === 'delivery'}
+                onSelect={() => onSelect({ kind: 'delivery' })}
+              />
+            </div>
+          ) : null}
         </div>
       </div>
 
-      <div className="cx-legend">
+      <div className="cy-legend">
         {(['run', 'wait', 'ok', 'bad', 'idle'] as Tone[]).map((t) => (
-          <span key={t} className="cx-key">
-            <span className={`cx-dot ${t}`} />
+          <span key={t} className="cy-key">
+            <span className={`cy-state-dot ${t}`} />
             {t === 'run' ? '运行中' : t === 'wait' ? '等待' : t === 'ok' ? '已完成' : t === 'bad' ? '失败' : '未开始'}
           </span>
         ))}
-        <span className="cx-note">节点、连线与动效均由服务端事件与会话状态推导, 无模拟动画</span>
+        <span className="cy-note">节点、连线与动效均由服务端事件与会话状态推导, 无模拟动画</span>
       </div>
     </div>
+  );
+}
+
+/** 父 → 子: 从父卡底边中点弯到子卡顶边中点, 控制点只落在两排之间的空隙里。 */
+function curve(x1: number, y1: number, x2: number, y2: number): string {
+  const gap = Math.max(28, y2 - y1);
+  const c1 = y1 + gap * 0.55;
+  const c2 = y2 - gap * 0.55;
+  return `M ${x1.toFixed(1)} ${y1.toFixed(1)} C ${x1.toFixed(1)} ${c1.toFixed(1)}, ${x2.toFixed(1)} ${c2.toFixed(1)}, ${x2.toFixed(1)} ${y2.toFixed(1)}`;
+}
+
+function stateColor(state: string): string {
+  if (state === 'accepted') return 'var(--ok)';
+  if (state === 'running' || state === 'verifying') return 'var(--accent-2)';
+  if (state === 'awaiting_review') return 'var(--accent)';
+  if (state === 'failed' || state === 'invalidated') return 'var(--bad)';
+  return 'var(--line-2)';
+}
+
+function nodeOfSeat(seat: Seat): NodeModel {
+  const total = seat.works.length;
+  const accepted = seat.works.filter((w) => w.state === 'accepted').length;
+  const elapsed = seat.elapsedMs === null ? '—' : duration(seat.elapsedMs);
+  const last = seat.session ? shortAgo(seat.session.lastEventAt, Date.now()) : '—';
+  return {
+    key: `seat-${seat.key}`,
+    kind: seat.root ? 'root' : 'seat',
+    seat,
+    title: seat.name,
+    sub: `${seat.roleLabel} · ${HARNESS_SHORT[seat.harness] ?? seat.harness}${seat.model ? ` · ${seat.model}` : ''}`,
+    big: `${elapsed} · ${total} 项`,
+    foot: `${seat.stateLabel} · ${last}`,
+    pct: total > 0 ? Math.round((accepted / total) * 100) : null,
+    tone: seat.tone,
+    accent: seat.accent,
+    segments: seat.works.slice(0, 8).map((w) => ({ color: stateColor(w.state), flex: 1 })),
+  };
+}
+
+function NodeCard({
+  node,
+  now,
+  selected,
+  onSelect,
+}: {
+  node: NodeModel;
+  now: number;
+  selected: boolean;
+  onSelect: () => void;
+}) {
+  void now;
+  return (
+    <button
+      type="button"
+      data-ck={node.key}
+      data-seat={node.seat?.participant.id}
+      className={`cy-card ${node.tone} ${node.kind} ${selected ? 'selected' : ''}`}
+      onClick={onSelect}
+      aria-pressed={selected}
+      aria-label={`${node.title} ${node.sub}`}
+    >
+      <span className="cy-card-head">
+        <span className="cy-card-dot" style={{ background: node.accent }} />
+        <b title={node.title}>{node.title}</b>
+        {node.tone === 'run' ? <span className="cy-now">当前</span> : null}
+      </span>
+      <span className="cy-card-sub" title={node.sub}>
+        {node.sub}
+      </span>
+      <span className="cy-card-big">{node.big}</span>
+      <span className="cy-bar">
+        {node.segments.length > 0 ? (
+          node.segments.map((s, i) => <span key={i} style={{ background: s.color, flex: s.flex }} />)
+        ) : (
+          <span style={{ background: 'var(--line-2)', flex: 1 }} />
+        )}
+      </span>
+      <span className="cy-card-foot">
+        <span>{node.foot}</span>
+        {node.pct !== null ? <b className={`cy-pct ${node.pct > 0 ? 'on' : ''}`}>{node.pct}%</b> : null}
+      </span>
+    </button>
   );
 }
 
@@ -275,95 +415,28 @@ export function CollabGraph({
 export function PhaseStepper({ phase, lifecycle }: { phase: TaskPhase; lifecycle: string }) {
   const idx = PHASE_STEPS.indexOf(phase);
   return (
-    <ol className="cx-steps" aria-label="任务阶段">
+    <ol className="cy-steps" aria-label="任务阶段">
       {PHASE_STEPS.map((step, i) => {
         const done = idx > i;
         const now = idx === i;
         return (
           <li key={step} className={`${done ? 'done' : ''} ${now ? 'now' : ''}`}>
-            <span className="cx-step-dot">{done ? '✓' : ''}</span>
-            <span className="cx-step-label">{PHASE_LABEL[step] ?? step}</span>
+            <span className="cy-step-dot">{done ? '✓' : ''}</span>
+            <span className="cy-step-label">{PHASE_LABEL[step] ?? step}</span>
           </li>
         );
       })}
-      {lifecycle === 'paused' ? <li className="cx-step-hold">已暂停</li> : null}
+      {lifecycle === 'paused' ? <li className="cy-step-hold">已暂停</li> : null}
     </ol>
   );
 }
 
-/* ------------------------------ 卡片 ------------------------------ */
+/* ------------------------------ 数据推导 ------------------------------ */
 
-function SeatCard({
-  ck,
-  seat,
-  now,
-  selected,
-  onSelect,
-}: {
-  ck: string;
-  seat: Seat;
-  now: number;
-  selected: boolean;
-  onSelect: () => void;
-}) {
-  const elapsed = seat.elapsedMs === null ? null : duration(seat.elapsedMs);
-  const works = seat.works.slice(0, MAX_WORKS);
-  const more = seat.works.length - works.length;
-
-  return (
-    <button
-      type="button"
-      data-seat={seat.participant.id}
-      data-ck={ck}
-      className={`cx-card ${seat.tone} ${seat.root ? 'root' : ''} ${selected ? 'selected' : ''}`}
-      onClick={onSelect}
-      aria-pressed={selected}
-      aria-label={`${seat.name} ${seat.roleLabel} ${seat.stateLabel} ${seat.doing}`}
-    >
-      <span className="cx-card-rail" style={{ background: seat.accent }} />
-      <span className="cx-card-top">
-        <span className="cx-avatar" style={{ background: seat.accentSoft, color: seat.accent }}>
-          {initials(seat.name)}
-        </span>
-        <span className="cx-card-id">
-          <b>{seat.name}</b>
-          <em title={`${seat.roleLabel} · ${seat.harness}${seat.model ? ` · ${seat.model}` : ''}`}>
-            {seat.roleLabel} · {HARNESS_SHORT[seat.harness] ?? seat.harness}
-            {seat.model ? ` · ${seat.model}` : ''}
-          </em>
-        </span>
-        <span className={`cx-state ${seat.tone}`}>
-          <span className={`cx-dot ${seat.tone}`} />
-          {seat.stateLabel}
-        </span>
-      </span>
-
-      <span className="cx-card-doing" title={seat.doing}>
-        {seat.doing}
-      </span>
-
-      <span className="cx-card-meta">
-        {seat.item ? `${ITEM_LABEL[seat.item.state as ItemState] ?? seat.item.state}` : '暂无工作项'}
-        <span className="cx-sep">·</span>
-        {elapsed && elapsed !== '—' ? `已用 ${elapsed}` : seat.session ? `空闲 · ${shortAgo(seat.session.lastEventAt, now)}` : '未启动会话'}
-      </span>
-
-      {works.length > 0 ? (
-        <span className="cx-works">
-          {works.map((w) => (
-            <span className="cx-work" key={w.id}>
-              <span className={`cx-work-dot ${w.state}`} />
-              <span className="cx-work-goal" title={w.goal}>
-                {w.goal}
-              </span>
-              <span className={`cx-work-state ${w.state}`}>{ITEM_LABEL[w.state as ItemState] ?? w.state}</span>
-            </span>
-          ))}
-          {more > 0 ? <span className="cx-work-more">还有 {more} 项</span> : null}
-        </span>
-      ) : null}
-    </button>
-  );
+function rank(state: string): number {
+  const order = ['running', 'verifying', 'awaiting_review', 'queued', 'ready', 'pending', 'produced', 'accepted', 'failed'];
+  const i = order.indexOf(state);
+  return i < 0 ? 99 : i;
 }
 
 function shortAgo(iso: string, now: number): string {
@@ -375,203 +448,15 @@ function shortAgo(iso: string, now: number): string {
   return `${Math.round(s / 3600)}h 前`;
 }
 
-/* ------------------------------ 布局 ------------------------------ */
-
-interface CardModel {
-  key: string;
-  seat: Seat | null;
-  /** 非席位卡(计划/交付)可被点开, 在右侧面板显示详情 */
-  select?: 'plan' | 'delivery';
-  title?: string;
-  sub?: string;
-  meta?: string;
-  glyph?: string;
-  tone?: Tone;
-  tag?: string;
-  accent?: string;
-  accentSoft?: string;
-}
-
-interface Stage {
-  key: string;
-  title: string;
-  cards: CardModel[];
-  /** 从上一条阶段流到这一段的动作名, 画在阶段之间的空隙里 */
-  inflow: string;
-}
-
-interface Wire {
-  key: string;
-  d: string;
-  color: string;
-  active: boolean;
-}
-
-/**
- * 阶段之间的连线: 从上一阶段每张卡的底边中点, 弯到下一阶段每张卡的顶边中点。
- * 全部是三次贝塞尔, 控制点只落在两阶段之间的走廊里, 因此不会压到卡片。
- */
-function buildWires(
-  stages: Stage[],
-  box: Map<string, { x: number; y: number; w: number; h: number }>,
-): Wire[] {
-  const out: Wire[] = [];
-  for (let i = 0; i < stages.length - 1; i += 1) {
-    const from = stages[i].cards.filter((c) => c.seat !== null);
-    const to = stages[i + 1].cards;
-    if (from.length === 0 || to.length === 0) continue;
-
-    const pairs: { a: CardModel; b: CardModel }[] = [];
-    if (from.length * to.length <= 8) {
-      for (const a of from) for (const b of to) pairs.push({ a, b });
-    } else {
-      // 太多对就每条目标卡只接最近的一两张来源卡, 避免糊成一团
-      for (const b of to) {
-        const B = box.get(b.key);
-        const bx = B ? B.x + B.w / 2 : 0;
-        const sorted = [...from].sort((p, q) => {
-          const P = box.get(p.key);
-          const Q = box.get(q.key);
-          return Math.abs((P ? P.x + P.w / 2 : 0) - bx) - Math.abs((Q ? Q.x + Q.w / 2 : 0) - bx);
-        });
-        pairs.push({ a: sorted[0], b });
-        if (sorted[1] && from.length > 2) pairs.push({ a: sorted[1], b });
-      }
-    }
-
-    // 同一张卡发出多条线时, 起点沿底边铺开, 避免全部挤在中轴线上
-    const bySource = new Map<string, { a: CardModel; b: CardModel }[]>();
-    for (const pair of pairs) {
-      const list = bySource.get(pair.a.key) ?? [];
-      list.push(pair);
-      bySource.set(pair.a.key, list);
-    }
-
-    for (const list of bySource.values()) {
-      const A = box.get(list[0].a.key);
-      if (!A) continue;
-      const spread = Math.min(34, A.w * 0.3);
-      list.forEach(({ a, b }, index) => {
-        const B = box.get(b.key);
-        if (!B) return;
-        const offset = list.length === 1 ? 0 : ((index - (list.length - 1) / 2) / (list.length - 1)) * 2 * spread;
-        const x1 = A.x + A.w / 2 + offset;
-        const y1 = A.y + A.h;
-        const x2 = B.x + B.w / 2;
-        const y2 = B.y;
-        const gap = Math.max(22, y2 - y1);
-        const c1 = y1 + gap * 0.62;
-        const c2 = y2 - gap * 0.62;
-        out.push({
-          key: `${a.key}->${b.key}`,
-          d: `M ${x1.toFixed(1)} ${y1.toFixed(1)} C ${x1.toFixed(1)} ${c1.toFixed(1)}, ${x2.toFixed(1)} ${c2.toFixed(1)}, ${x2.toFixed(1)} ${y2.toFixed(1)}`,
-          color: a.accent ?? 'var(--line-3)',
-          active: (a.seat?.tone ?? 'idle') === 'run' || (b.seat?.tone ?? 'idle') === 'run',
-        });
-      });
-    }
-  }
-  return out;
-}
-
-/**
- * 竖向阶段布局: 主控/规划 → 执行者 → 审核席位 → 交付, 阶段自上而下排列;
- * 阶段内部用网格自动换行(多执行者/多轮返工只会让阶段变高, 不会横向溢出),
- * 整块画布纵向滚动, 连线只画在阶段之间的空隙里, 因此不会压住任何卡片。
- */
-function buildStages(detail: TaskDetail, seats: Seat[]): Stage[] {
-  const lead = seats.find((s) => s.root) ?? null;
-  const workers = seats.filter((s) => !s.root && s.participant.role === 'worker');
-  const strongs = seats.filter((s) => !s.root && s.participant.role === 'strong');
-  const done = detail.task.lifecycle === 'completed';
-  const hasDeliver = detail.artifacts.length > 0 || detail.reviewRounds.length > 0 || done || detail.task.phase === 'delivery';
-
-  const stages: Stage[] = [];
-
-  if (lead) {
-    const cards: CardModel[] = [{ key: `seat-${lead.key}`, seat: lead }];
-    if (detail.plan) {
-      const planLive = detail.task.lifecycle === 'awaiting_plan_approval' ? 'wait' : detail.plan.status === 'approved' ? 'ok' : 'idle';
-      cards.push({
-        key: 'plan-card',
-        seat: null,
-        select: 'plan',
-        title: `计划 v${detail.plan.number}`,
-        sub: `${detail.plan.content.workItems.length} 个工作项 · ${detail.plan.content.deliverables.length} 份交付物`,
-        meta: `哈希 ${detail.plan.contentHash.slice(0, 10)} · ${planLive === 'wait' ? '待你确认' : planLive === 'ok' ? '已批准' : detail.plan.status}`,
-        glyph: '计',
-        tone: planLive as Tone,
-        tag: planLive === 'wait' ? '待确认' : planLive === 'ok' ? '已批准' : '草稿',
-        accent: 'var(--accent)',
-        accentSoft: 'var(--accent-soft)',
-      });
-    }
-    stages.push({ key: 'plan', title: '主控 / 规划', cards, inflow: '' });
-  }
-
-  if (workers.length > 0) {
-    stages.push({
-      key: 'exec',
-      title: '执行者',
-      cards: workers.map((w) => ({ key: `seat-${w.key}`, seat: w })),
-      inflow: '派发',
-    });
-  }
-
-  if (strongs.length > 0) {
-    stages.push({
-      key: 'review',
-      title: '审核席位',
-      cards: strongs.map((s) => ({ key: `seat-${s.key}`, seat: s })),
-      inflow: '提交审核',
-    });
-  }
-
-  if (hasDeliver) {
-    stages.push({
-      key: 'deliver',
-      title: '交付',
-      inflow: '交付',
-      cards: [
-        {
-          key: 'deliver-card',
-          select: 'delivery',
-          seat: null,
-          title: '交付物',
-          sub: `${detail.artifacts.length} 个登记文件 · ${detail.reviewRounds.length} 轮审核`,
-          meta: `工作项 ${detail.workItems.filter((w) => w.state === 'accepted').length}/${detail.workItems.length} 已接受 · 交付说明见「产物」页签`,
-          glyph: '物',
-          tone: done ? 'ok' : 'wait',
-          tag: done ? '已交付' : '收集中',
-          accent: 'var(--ok)',
-          accentSoft: 'var(--ok-soft)',
-        },
-      ],
-    });
-  }
-
-  return stages;
-}
-
-function anyRunning(stage: Stage): boolean {
-  return stage.cards.some((c) => (c.seat?.tone ?? c.tone) === 'run');
-}
-
-/* ------------------------------ 数据推导 ------------------------------ */
-
-function rank(state: string): number {
-  const order = ['running', 'verifying', 'awaiting_review', 'queued', 'ready', 'pending', 'produced', 'accepted', 'failed'];
-  const i = order.indexOf(state);
-  return i < 0 ? 99 : i;
-}
-
 function buildSeats(detail: TaskDetail, events: EventEnvelope[]): Seat[] {
   const items = detail.workItems;
   const sessions = [...detail.sessions].sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
   const openSessions = sessions.filter((s) => !s.closedAt);
 
   const sessionFor = (participantId: string) =>
-    openSessions.find((s) => s.participantId === participantId) ?? sessions.find((s) => s.participantId === participantId) ?? null;
+    openSessions.find((s) => s.participantId === participantId) ??
+    sessions.find((s) => s.participantId === participantId) ??
+    null;
 
   const toolFor = (sessionId: string | null): string | null => {
     if (!sessionId) return null;
@@ -603,53 +488,48 @@ function buildSeats(detail: TaskDetail, events: EventEnvelope[]): Seat[] {
 
     let tone: Tone = 'idle';
     let stateLabel = '未启动';
-    let doing = '尚未启动会话';
-
     const liveItem = item && (item.state === 'running' || item.state === 'verifying') ? item : null;
 
     if (liveAttempt || liveItem) {
       tone = 'run';
       stateLabel = liveItem?.state === 'verifying' ? '验证中' : '执行中';
-      doing = tool ? `工具 ${tool}` : session?.activity === 'tool_running' ? '工具执行中' : (liveItem?.goal ?? '生成回复中…');
     } else if (session && !session.closedAt) {
       if (session.connectionState === 'disconnected' || session.processHealth === 'exited') {
         tone = 'bad';
         stateLabel = '已断开';
-        doing = '连接已断开, 等待重新调度';
       } else if (session.activity === 'no_recent_event') {
         tone = 'wait';
         stateLabel = '无新事件';
-        doing = `超过阈值无事件 · 最后 ${shortAgo(session.lastEventAt, Date.now())}`;
       } else if (session.activity === 'generating' || session.activity === 'tool_running') {
         tone = 'run';
-        stateLabel = '运行中';
-        doing = tool ? `工具 ${tool}` : '生成回复中…';
+        stateLabel = tool ? `工具 ${tool}` : '生成中';
       } else {
         tone = 'idle';
         stateLabel = '空闲';
-        doing = '会话空闲, 等待调度';
       }
     } else if (item) {
       if (item.state === 'accepted') {
         tone = 'ok';
         stateLabel = '已完成';
-        doing = item.goal;
       } else if (item.state === 'awaiting_review') {
         tone = 'wait';
         stateLabel = '待审核';
-        doing = `等待强模型审核 · ${item.goal}`;
       } else if (item.state === 'failed' || item.state === 'invalidated') {
         tone = 'bad';
         stateLabel = '失败';
-        doing = item.lastError ?? '该工作项失败';
       } else {
         tone = 'wait';
         stateLabel = '排队中';
-        doing = `等待派发 · ${item.goal}`;
       }
     }
 
-    const elapsedMs = liveAttempt ? Date.now() - new Date(liveAttempt.startedAt).getTime() : null;
+    // 已结束的席位也要看得到"花了多久": 没有活着的尝试时, 累加历史尝试时长
+    const spentMs = attempts.reduce((sum, a) => {
+      const start = new Date(a.startedAt).getTime();
+      const end = a.endedAt ? new Date(a.endedAt).getTime() : Date.now();
+      return sum + Math.max(0, end - start);
+    }, 0);
+    const elapsedMs = attempts.length > 0 ? spentMs : null;
     const roleLabel = p.isLead ? '主控' : p.role === 'strong' ? '强模型' : '执行者';
 
     return {
@@ -660,16 +540,14 @@ function buildSeats(detail: TaskDetail, events: EventEnvelope[]): Seat[] {
       harness: profile?.adapterId ?? 'unknown',
       model: profile?.requestedModel || profile?.name || '',
       accent: ACCENTS[index % ACCENTS.length],
-      accentSoft: ACCENT_SOFT[index % ACCENT_SOFT.length],
       tone,
       stateLabel,
-      doing,
       elapsedMs,
       works,
-      item,
       session,
-      attempt: liveAttempt,
       root: Boolean(p.isLead),
     };
   });
 }
+
+void ACCENT_SOFT;
