@@ -33,6 +33,7 @@ import type { Repo } from '../../../packages/storage/src/repo.js';
 import type { HarnessAdapter } from '../../../packages/adapters/src/types.js';
 import type { AppConfig } from './config.js';
 import { preparePrivateHome } from './homes.js';
+import type { RuntimeControl } from './runtime-control.js';
 
 const HANDLED = Symbol('handled');
 
@@ -62,6 +63,7 @@ export class ApiServer {
     private readonly engine: Engine,
     private readonly cfg: AppConfig,
     private readonly adapters: Record<string, HarnessAdapter>,
+    private readonly runtime?: RuntimeControl,
   ) {
     this.register();
   }
@@ -94,6 +96,9 @@ export class ApiServer {
 
   private register(): void {
     this.add('GET', '/api/health', () => this.health());
+    this.add('GET', '/api/runtime', () => this.runtimeStatus());
+    this.add('POST', '/api/runtime/heartbeat', () => this.runtimeHeartbeat());
+    this.add('POST', '/api/runtime/close-intent', () => this.runtimeCloseIntent());
     this.add('GET', '/api/profiles', () => this.listProfiles());
     this.add('POST', '/api/profiles', (ctx) => this.createProfile(ctx));
     this.add('PATCH', '/api/profiles/:id', (ctx) => this.patchProfile(ctx));
@@ -332,6 +337,27 @@ export class ApiServer {
       adapters: Object.values(this.engineAdapters()).map((a) => ({ id: a.id, displayName: a.displayName, mock: a.mock })),
       time: nowIso(),
     };
+  }
+
+  /**
+   * 页面存活状态: 是否"关网页即停服务"、上次心跳、排队中的关停。
+   * 前端用这个接口判断要不要在关闭时提示。
+   */
+  private runtimeStatus() {
+    if (!this.runtime) {
+      return { exitOnUiClose: false, lastHeartbeatAgoMs: null, pendingStopInMs: null, activeSessions: 0, stopped: false };
+    }
+    return this.runtime.status();
+  }
+
+  private runtimeHeartbeat() {
+    this.runtime?.noteHeartbeat();
+    return { ok: true, ...this.runtimeStatus() };
+  }
+
+  private runtimeCloseIntent() {
+    if (!this.runtime) return { ok: true, scheduled: false, delayMs: null, reason: 'disabled' };
+    return { ok: true, ...this.runtime.requestClose() };
   }
 
   private engineAdapters(): Record<string, HarnessAdapter> {

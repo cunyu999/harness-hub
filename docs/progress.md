@@ -39,12 +39,19 @@
   协作图改为按容器真实尺寸布局(`ResizeObserver` + CSS 点阵背景 + 节点投影), 修掉了 SVG 等比缩放导致的
   文字误穿与左右留白, 以及等宽字体在 10.5px 下出现横线穿透的渲染问题;
   修复任务列表/标题/表格/产物预览处的文字裁切(ellipsis + `overflow-wrap`), 产物预览改为整段可读(不再半行截断)。
-- 自动化测试 `tests/`: 25 项通过(`npm test`)。
+- 关网页即停服务(ADR-011): `apps/web/src/lib/runtime.ts` 每 2s 心跳, 关闭/刷新时 `sendBeacon` 发关闭意图;
+  `apps/server/src/runtime-control.ts` 的 `UiWatchdog` 在宽限期(默认 2.5s)后优雅关停, 刷新由新心跳取消,
+  心跳中断 12s 且无活跃会话时兜底; `beforeunload` 触发浏览器自带确认框, 侧栏常驻提示"关闭页面将停止后台服务"。
+  关停走 `engine.shutdown()` + 新增的 `Engine.settleOnShutdown()`: 关会话/杀子进程/记 `interrupted`/审批置 `expired`/
+  任务置 `paused`, 不自动重跑。`HH_EXIT_WITH_UI=0` 可恢复常驻模式。
+- 自动化测试 `tests/`: 30 项通过(`npm test`)。
   - `tests/core.test.ts` 14 项: 路径安全、计划校验(强制全部强模型审核/越界拒绝/未选参与者报错/依赖环/数量上限)、
     调度(依赖就绪、并发上限、每配置串行、写入范围冲突、死锁判定)。
   - `tests/engine.mock.test.ts` 7 项: 单强模型全链路、双强模型讨论+交叉复核、同配置回合不重叠、
     取消语义、重启恢复不自动重跑、PLAN-02/04/05(补充生成 v2、旧版本作废、过期/重复批准被拒)、
     PLAN-06(执行中范围变化 → 暂停并请求新版本)。
+  - `tests/runtime.test.ts` 5 项: 关闭意图到期关停、心跳取消关停、心跳超时兜底(有活跃会话时不关停)、
+    开关关闭时只报告状态。
   - `tests/http.test.ts` 4 项: SECURITY-01(非本机 Host 403、跨站 Origin 403、非 JSON 415)、
     API 校验(422/404/未知产物 404)、PLAN-03/05(幂等、哈希与版本冲突 409、重复批准 409)、
     SSE(首帧快照、事件 seq 作 id、过旧游标 `resync_required`)。

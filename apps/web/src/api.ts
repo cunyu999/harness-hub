@@ -96,6 +96,24 @@ export const api = {
   probeProfile: (id: string, mode: 'inspect' | 'live') =>
     request<ProbeResponse>('POST', `/api/profiles/${id}/probe`, { mode }),
   capabilities: () => request<{ adapters: { id: string; displayName: string; mock: boolean }[] }>('GET', '/api/adapters'),
+  /** 页面存活心跳: 服务靠它判断网页还在不在。 */
+  heartbeat: () => request<UiRuntimeStatus>('POST', '/api/runtime/heartbeat', {}),
+  runtime: () => request<UiRuntimeStatus>('GET', '/api/runtime'),
+  /** 页面即将关闭: 让服务在 grace 之后自行停止(刷新页面会被新心跳取消)。 */
+  closeIntent: () => request<{ scheduled: boolean; delayMs: number | null; reason?: string }>(
+    'POST',
+    '/api/runtime/close-intent',
+    {},
+  ),
 };
+
+export interface UiRuntimeStatus {
+  exitOnUiClose: boolean;
+  lastHeartbeatAgoMs: number | null;
+  pendingStopInMs: number | null;
+  activeSessions: number;
+  stopped: boolean;
+  pageSeen: boolean;
+}
 
 export type { ExecutionProfile, TaskSnapshot, EventEnvelope, ProfileDto, ArtifactDto, ReviewBundle };

@@ -60,3 +60,15 @@
   横线穿透、文本被卡片裁切的观感; 按容器布局可让节点保持 1:1 像素、字号稳定, 窄屏重排而不是缩放。
 - 取舍: 放弃"整图缩放"的简单实现, 换取可读性; 参与者很多时允许画布纵向滚动而不是压缩卡片。
 
+
+## ADR-011 后台进程生命周期跟随网页(心跳 + 关闭意图)
+
+- 决策: 默认 HH_EXIT_WITH_UI=1。页面每 2s 发 `POST /api/runtime/heartbeat`; 关闭/刷新时用
+  `navigator.sendBeacon` 发 `POST /api/runtime/close-intent`, 服务在 `HH_UI_GRACE_MS`(默认 2500ms)后优雅关停,
+  期间收到心跳(刷新场景)则取消。心跳中断 `HH_UI_IDLE_MS`(默认 12000ms)且没有活跃会话时兜底关停。
+  关闭前的提示用 `beforeunload`(浏览器自带确认框, 文案不可自定义) + 侧栏常驻提示。
+- 理由: 单用户本机工具, 关掉网页后还留一个 node 进程既不直观也容易留下孤儿 harness 子进程;
+  但直接 kill 会丢状态, 所以走 `engine.shutdown()` + `settleOnShutdown()`: 关会话、杀子进程、把在跑的尝试记
+  `interrupted`、未决审批记 `expired`、活动任务置 `paused`, 下次启动 `recover()` 不会重跑。
+- 取舍: 宽限期让刷新不误杀服务, 代价是关页面后约 2.5s 才真正退出; `HH_EXIT_WITH_UI=0` 保留常驻模式,
+  便于只用 API 或同时用命令行的场景。

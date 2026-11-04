@@ -9,6 +9,7 @@ import { Conversation } from './components/Conversation';
 import { NewTaskDialog, ProfilesPanel } from './components/Dialogs';
 import { LIFECYCLE_LABEL, LIFECYCLE_TONE, PHASES, PHASE_LABEL, clock, shortId } from './lib/format';
 import { useTheme } from './lib/theme';
+import { usePageLifecycle } from './lib/runtime';
 
 type Tab = 'plan' | 'chat' | 'approvals' | 'review' | 'artifacts' | 'events';
 
@@ -31,6 +32,7 @@ export function App() {
   const { tasks, reload: reloadTasks } = useTaskList();
   const state = useTask(taskId);
   const { theme, toggle: toggleTheme } = useTheme();
+  const { status: runtimeStatus } = usePageLifecycle();
 
   const loadProfiles = useCallback(() => {
     void api
@@ -160,6 +162,11 @@ export function App() {
               hl {detail?.highWaterSeq ?? 0}
             </span>
           </div>
+          {runtimeStatus?.exitOnUiClose ? (
+            <p className="foot-note" title="关闭或刷新页面时浏览器会先确认; 确认关闭后后台进程会在约 2.5s 内结束, 刷新则不会。">
+              关闭页面将停止后台服务
+            </p>
+          ) : null}
         </div>
       </aside>
 

@@ -15,6 +15,7 @@ import { Db } from '../../../packages/storage/src/db.js';
 import { Repo } from '../../../packages/storage/src/repo.js';
 import { loadConfig, type AppConfig } from './config.js';
 import { ApiServer } from './http.js';
+import { UiWatchdog } from './runtime-control.js';
 
 function buildAdapters(cfg: AppConfig): Record<string, HarnessAdapter> {
   const nm = path.join(cfg.root, 'node_modules');
@@ -154,7 +155,21 @@ async function main(): Promise<void> {
   const recovery = engine.recover();
   engine.startMonitoring(15_000);
 
-  const api = new ApiServer(repo, engine, cfg, adapters);
+  // 网页关掉就停服务: 页面会先发 close-intent, 心跳消失则由空闲超时兜底; 都走优雅关停。
+  let shuttingDown = false;
+  const watchdog = new UiWatchdog({
+    enabled: cfg.exitOnUiClose,
+    graceMs: cfg.uiGraceMs,
+    idleTimeoutMs: cfg.uiIdleTimeoutMs,
+    firstHeartbeatTimeoutMs: cfg.uiFirstHeartbeatMs,
+    activeSessions: () => repo.countActiveSessions(),
+    onStop: (reason) => shutdown(reason),
+    log: (message) => console.log(`[harness-hub] ${message}`),
+  });
+  const watchdogTimer = setInterval(() => watchdog.tick(), 1000);
+  watchdogTimer.unref?.();
+
+  const api = new ApiServer(repo, engine, cfg, adapters, watchdog);
   await api.start();
 
   // eslint-disable-next-line no-console
@@ -163,18 +178,39 @@ async function main(): Promise<void> {
   console.log(
     `[harness-hub] 数据库: ${cfg.dbPath}\n[harness-hub] 工作区根: ${path.join(cfg.runsDir, '<taskId>', 'workspace')}\n[harness-hub] 恢复: 中断尝试 ${recovery.interruptedAttempts}, 失效审批 ${recovery.expiredApprovals}, 暂停任务 ${recovery.pausedTasks}`,
   );
+  // eslint-disable-next-line no-console
+  console.log(
+    cfg.exitOnUiClose
+      ? '[harness-hub] 关闭网页会结束后台进程(可在网页上关闭前确认); 如需常驻设 HH_EXIT_WITH_UI=0。'
+      : '[harness-hub] HH_EXIT_WITH_UI=0: 关闭网页不影响后台进程。',
+  );
 
-  const shutdown = async (signal: string) => {
+  async function shutdown(reason: string): Promise<void> {
+    if (shuttingDown) return;
+    shuttingDown = true;
     // eslint-disable-next-line no-console
-    console.log(`[harness-hub] 收到 ${signal}, 正在停止...`);
+    console.log(`[harness-hub] 开始关停 (${reason})...`);
+    clearInterval(watchdogTimer);
     // 先停后台流程再关库: 否则还在跑的回合会撞上 "database is not open"
     await engine.shutdown(15_000);
+    // 关停后仍留在 running 的尝试/未决审批: 如实记为中断, 不假装成功, 也不自动重跑
+    try {
+      const settled = engine.settleOnShutdown(reason);
+      // eslint-disable-next-line no-console
+      console.log(
+        `[harness-hub] 收尾: 中断尝试 ${settled.interruptedAttempts}, 失效审批 ${settled.expiredApprovals}, 暂停任务 ${settled.pausedTasks}`,
+      );
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn(`[harness-hub] 收尾失败: ${(err as Error).message}`);
+    }
     clearInterval(heartbeat);
     await api.stop();
     repo.releaseLease('server', nonce);
     db.close();
     process.exit(0);
-  };
+  }
+
   process.on('SIGINT', () => void shutdown('SIGINT'));
   process.on('SIGTERM', () => void shutdown('SIGTERM'));
 }

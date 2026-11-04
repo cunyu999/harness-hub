@@ -2165,6 +2165,39 @@ export class Engine implements AdapterHost {
   /* ------------------------------------------------------------------ */
 
   recover(): { interruptedAttempts: number; expiredApprovals: number; pausedTasks: number } {
+    return this.settleInterrupted({
+      errorClass: 'service_restart',
+      errorCode: 'restart_recovered',
+      sessionError: '服务重启: 原进程连接已丢失, 未自动重跑',
+      attemptMessage: '服务重启导致尝试中断; 未自动重跑有副作用的操作',
+      taskMessage: '服务重启后任务已暂停; 请检查会话与产物后手动恢复, 不会自动重跑。',
+      workItemMessage: '服务重启: 该次尝试已中断, 恢复后需重新执行',
+    });
+  }
+
+  /**
+   * 服务随网页关闭而停止时调用: 与重启恢复同样的语义 —— 记录中断, 不假装成功, 不自动重跑。
+   * 必须在 engine.shutdown() 之后执行, 这样遗留的进程内回合已经不再写入。
+   */
+  settleOnShutdown(reason: string): { interruptedAttempts: number; expiredApprovals: number; pausedTasks: number } {
+    return this.settleInterrupted({
+      errorClass: reason,
+      errorCode: reason === 'ui_closed' ? 'closed_with_page' : 'service_shutdown',
+      sessionError: '网页关闭导致服务停止: 会话已断开, 未自动重跑',
+      attemptMessage: '网页关闭导致服务停止, 该次尝试被中断; 重启后不会自动重跑有副作用的操作',
+      taskMessage: '后台服务已随网页关闭而停止; 未完成的任务保持暂停, 重启后请手动恢复。',
+      workItemMessage: '服务停止: 该次尝试已中断, 恢复后需重新执行',
+    });
+  }
+
+  private settleInterrupted(opts: {
+    errorClass: string;
+    errorCode: string;
+    sessionError: string;
+    attemptMessage: string;
+    taskMessage: string;
+    workItemMessage: string;
+  }): { interruptedAttempts: number; expiredApprovals: number; pausedTasks: number } {
     const openSessions = this.repo.listOpenSessions();
     const activeAttempts = this.repo.listActiveAttempts();
     const tasksTouched = new Set<string>();
@@ -2174,7 +2207,7 @@ export class Engine implements AdapterHost {
         processHealth: s.processRef?.pid && isProcessAlive(s.processRef.pid) ? 'unknown' : 'exited',
         activity: 'unknown',
         status: 'orphaned',
-        error: '服务重启: 原进程连接已丢失, 未自动重跑',
+        error: opts.sessionError,
         closedAt: nowIso(),
       });
       tasksTouched.add(s.taskId);
@@ -2189,20 +2222,20 @@ export class Engine implements AdapterHost {
       this.repo.updateAttempt(a.id, {
         status: 'interrupted',
         endedAt: nowIso(),
-        errorClass: 'service_restart',
-        errorMessage: '服务重启导致尝试中断; 未自动重跑有副作用的操作',
+        errorClass: opts.errorClass,
+        errorMessage: opts.attemptMessage,
       });
       tasksTouched.add(a.taskId);
       this.emit('attempt.interrupted', {
         taskId: a.taskId,
         attemptId: a.id,
         sessionId: a.sessionId,
-        payload: { reason: 'service_restart' },
+        payload: { reason: opts.errorClass },
       });
     }
     let expired = 0;
     for (const ap of this.repo.listAllPendingApprovals()) {
-      this.repo.resolveApproval(ap.id, 'expired', '服务重启, 原生请求已失效');
+      this.repo.resolveApproval(ap.id, 'expired', '服务停止, 原生请求已失效');
       expired += 1;
     }
     let pausedTasks = 0;
@@ -2214,8 +2247,8 @@ export class Engine implements AdapterHost {
           taskId,
           {
             lifecycle: 'paused',
-            errorCode: 'restart_recovered',
-            errorMessage: '服务重启后任务已暂停; 请检查会话与产物后手动恢复, 不会自动重跑。',
+            errorCode: opts.errorCode,
+            errorMessage: opts.taskMessage,
             updatedAt: nowIso(),
           },
           null,
@@ -2229,7 +2262,7 @@ export class Engine implements AdapterHost {
         if (['queued', 'running', 'verifying'].includes(item.state)) {
           this.repo.updateWorkItem(item.id, {
             state: 'pending',
-            lastError: '服务重启: 该次尝试已中断, 恢复后需重新执行',
+            lastError: opts.workItemMessage,
             updatedAt: nowIso(),
           });
           this.emit('work_item.updated', {

@@ -28,6 +28,14 @@ export interface AppConfig {
   runsDir: string;
   logsDir: string;
   version: string;
+  /** 关闭网页后是否结束后台进程(HH_EXIT_WITH_UI, 默认开)。 */
+  exitOnUiClose: boolean;
+  /** 收到关闭意图后等待新心跳的时间, 覆盖"刷新页面"的情况(HH_UI_GRACE_MS)。 */
+  uiGraceMs: number;
+  /** 心跳中断多久后判定页面已消失(HH_UI_IDLE_MS)。 */
+  uiIdleTimeoutMs: number;
+  /** 从未有页面连上时的宽限; 0 表示一直等(HH_UI_FIRST_MS, 默认 0)。 */
+  uiFirstHeartbeatMs: number;
 }
 
 export function loadConfig(overrides: Partial<AppConfig> = {}): AppConfig {
@@ -46,6 +54,10 @@ export function loadConfig(overrides: Partial<AppConfig> = {}): AppConfig {
     runsDir: process.env.HH_RUNS_DIR ? path.resolve(process.env.HH_RUNS_DIR) : path.join(root, '.local', 'runs'),
     logsDir: path.join(root, '.local', 'logs'),
     version: '0.1.0',
+    exitOnUiClose: (process.env.HH_EXIT_WITH_UI ?? '1') !== '0',
+    uiGraceMs: Number(process.env.HH_UI_GRACE_MS ?? 2500),
+    uiIdleTimeoutMs: Number(process.env.HH_UI_IDLE_MS ?? 12_000),
+    uiFirstHeartbeatMs: Number(process.env.HH_UI_FIRST_MS ?? 0),
     ...overrides,
   };
 }
