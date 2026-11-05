@@ -21,6 +21,17 @@ export function NewTaskDialog({
   const [constraints, setConstraints] = useState('');
   const [outputHint, setOutputHint] = useState('');
   const [workspace, setWorkspace] = useState('');
+  /** 优先用 Windows 自带的文件夹选择框; 不支持或失败时才回退到网页内浏览。 */
+  const pickWorkspaceNative = async () => {
+    try {
+      const res = await api.pickDirectory(workspace.trim() || null);
+      if (res.path) setWorkspace(res.path);
+      return;
+    } catch {
+      setPickingWorkspace(true);
+    }
+  };
+
   const [pickingWorkspace, setPickingWorkspace] = useState(false);
   // 角色默认权限: planner 默认完全权限, worker 默认工作区内可写; 建好任务后仍可在对话栏逐个改
   const [plannerSandbox, setPlannerSandbox] = useState<'read-only' | 'workspace-write' | 'danger-full-access'>(
@@ -144,7 +155,7 @@ export function NewTaskDialog({
               onChange={(e) => setWorkspace(e.target.value)}
               placeholder="例如 D:/projects/my-app; 留空则每个任务用自己的目录"
             />
-            <button className="btn tiny" type="button" onClick={() => setPickingWorkspace(true)}>
+            <button className="btn tiny" type="button" onClick={() => void pickWorkspaceNative()}>
               选择…
             </button>
           </div>

@@ -33,7 +33,7 @@ import { isInside, mediaTypeFor, newId, normalizeRelPath, nowIso } from '../../.
 import type { Repo } from '../../../packages/storage/src/repo.js';
 import type { HarnessAdapter } from '../../../packages/adapters/src/types.js';
 import type { AppConfig } from './config.js';
-import { guessMediaType, listDirectory } from './fs.js';
+import { guessMediaType, listDirectory, pickDirectoryNative } from './fs.js';
 import { preparePrivateHome } from './homes.js';
 import type { RuntimeControl } from './runtime-control.js';
 
@@ -110,6 +110,7 @@ export class ApiServer {
 
     // 网页里的"选择工作区": 只读列目录
     this.add('GET', '/api/fs/list', (ctx) => this.listFs(ctx));
+    this.add('POST', '/api/fs/pick-directory', (ctx) => this.pickDirectory(ctx));
 
     this.add('GET', '/api/tasks', () => this.listTasks());
     this.add('POST', '/api/tasks', (ctx) => this.createTask(ctx));
@@ -601,6 +602,28 @@ export class ApiServer {
   /** 只读列目录, 给"选择工作区"用(不做任何写操作)。 */
   private async listFs(ctx: Ctx): Promise<unknown> {
     return listDirectory(ctx.url.searchParams.get('path'));
+  }
+
+  /**
+   * 打开 Windows 自带的文件夹选择框(跑在宿主机上), 返回选中的绝对路径。
+   * 取消时 path 为 null; 非 Windows 或对话框起不来时报 409/500, 前端回退到网页内浏览。
+   */
+  private async pickDirectory(ctx: Ctx): Promise<unknown> {
+    if (process.platform !== 'win32') {
+      throw new EngineError('native_picker_unavailable', '当前平台没有系统文件夹选择框, 请用网页内的目录浏览', 409);
+    }
+    const body = (ctx.body ?? {}) as { initial?: unknown };
+    const initial = typeof body.initial === 'string' ? body.initial : null;
+    try {
+      const picked = await pickDirectoryNative(initial);
+      return { path: picked };
+    } catch (e) {
+      throw new EngineError(
+        'native_picker_failed',
+        `系统文件夹选择框没能打开: ${e instanceof Error ? e.message : String(e)}`,
+        500,
+      );
+    }
   }
 
   /**

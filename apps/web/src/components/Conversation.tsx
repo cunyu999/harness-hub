@@ -64,6 +64,18 @@ export function Conversation({
   type Pending = { id: string; file: File; preview: string | null };
   const [pendingFiles, setPendingFiles] = useState<Pending[]>([]);
   const [dragging, setDragging] = useState(false);
+  /** 优先用 Windows 自带的文件夹选择框; 平台不支持或弹不出来时才回退到网页内浏览。 */
+  const pickWorkspaceNative = async (participantId: string | null) => {
+    try {
+      const res = await api.pickDirectory(wsDraft.trim() || null);
+      if (res.path) setWsDraft(res.path);
+      return;
+    } catch {
+      setPickingWs(true);
+    }
+    void participantId;
+  };
+
   const [pickingWs, setPickingWs] = useState(false);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -467,7 +479,13 @@ export function Conversation({
                                 onChange={(e) => setWsDraft(e.target.value)}
                               />
                               <div className="cs-actions">
-                                <button type="button" className="btn tiny" onClick={() => setPickingWs(true)}>
+                                <button
+                                  type="button"
+                                  className="btn tiny"
+                                  onClick={() => {
+                                    void pickWorkspaceNative(current?.id ?? null);
+                                  }}
+                                >
                                   选择…
                                 </button>
                                 {runningSessionId ? (

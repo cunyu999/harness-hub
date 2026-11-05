@@ -86,6 +86,9 @@ export const api = {
       roots: { label: string; path: string }[];
       error?: string;
     }>('GET', `/api/fs/list${path ? `?path=${encodeURIComponent(path)}` : ''}`),
+  /** 打开 Windows 自带的文件夹选择框(在宿主机上弹), 取消时 path 为 null。 */
+  pickDirectory: (initial?: string | null) =>
+    request<{ path: string | null }>('POST', '/api/fs/pick-directory', { initial: initial ?? null }),
   uploadAttachment: (taskId: string, file: { name: string; dataBase64: string; mediaType?: string }) =>
     request<{
       name: string;

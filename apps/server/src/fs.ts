@@ -1,6 +1,7 @@
 import { existsSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { spawn } from 'node:child_process';
 
 export interface FsEntry {
   name: string;
@@ -82,8 +83,79 @@ export function listDirectory(input: string | null | undefined): FsListing {
   return { path: abs, parent: parent === abs ? null : parent, entries, roots: roots() };
 }
 
-/** 允许带出来的文件类型(上传用), 其余一律按二进制处理。 */
-export function guessMediaType(name: string): string {
+/**
+ * 用 Windows 自带的文件夹选择框挑目录(和 Codex 这类本机 harness 的做法一致)。
+ * 服务在本机跑, 所以弹的是宿主机上的原生对话框; 取消返回 null。
+ * 非 Windows 或调用失败时抛错, 由调用方回退到网页内的目录浏览。
+ */
+export function pickDirectoryNative(initial?: string | null): Promise<string | null> {
+  if (process.platform !== 'win32') {
+    return Promise.reject(new Error('当前平台没有 Windows 文件夹选择框'));
+  }
+  const start = (initial ?? '').trim() || os.homedir();
+  const script = [
+    'Add-Type -AssemblyName System.Windows.Forms | Out-Null',
+    '$d = New-Object System.Windows.Forms.FolderBrowserDialog',
+    "$d.Description = '选择这个任务/席位的工作目录'",
+    '$d.ShowNewFolderButton = $true',
+    `$d.SelectedPath = ${JSON.stringify(start)}`,
+    "if ($d.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { 'SELECTED:' + $d.SelectedPath }",
+  ].join('; ');
+
+  return new Promise<string | null>((resolve, reject) => {
+    const child = spawn(
+      'powershell.exe',
+      ['-NoProfile', '-STA', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', script],
+      { windowsHide: false, stdio: ['ignore', 'pipe', 'pipe'] },
+    );
+    let out = '';
+    let err = '';
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      try {
+        child.kill();
+      } catch {
+        /* ignore */
+      }
+      reject(new Error('打开系统文件夹选择框超时'));
+    }, 300_000);
+
+    child.stdout?.on('data', (b: Buffer) => {
+      out += b.toString();
+    });
+    child.stderr?.on('data', (b: Buffer) => {
+      err += b.toString();
+    });
+    child.on('error', (e) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      reject(e);
+    });
+    child.on('close', () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      const line = out
+        .split(/\r?\n/)
+        .map((l) => l.trim())
+        .find((l) => l.startsWith('SELECTED:'));
+      if (line) {
+        resolve(line.slice('SELECTED:'.length).trim() || null);
+        return;
+      }
+      if (err.trim()) {
+        reject(new Error(err.trim().slice(0, 400)));
+        return;
+      }
+      resolve(null);
+    });
+  });
+}
+
+/** 允许带出来的文件类型(上传用), 其余一律按二进制处理。 */export function guessMediaType(name: string): string {
   const ext = path.extname(name).toLowerCase();
   const map: Record<string, string> = {
     '.png': 'image/png',
