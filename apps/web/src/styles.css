@@ -2985,3 +2985,30 @@ a.link:hover {
   gap: 6px;
   justify-content: flex-end;
 }
+
+/* 席位设置浮层: 锚定在「工作区 / 权限」按钮上方, 不占消息区 */
+.composer-tools-wrap {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+
+.cs-popover {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 10px);
+  width: min(520px, 92vw);
+  z-index: 30;
+  padding: 12px;
+  border: 1px solid var(--line-2);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.28);
+}
+
+.cs-popover .conv-settings {
+  margin: 0;
+  border: none;
+  background: transparent;
+  padding: 0;
+}

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { TaskDetail } from '../api';
 import { api } from '../api';
 import type { StreamDelta } from '../store';
@@ -70,6 +70,26 @@ export function Conversation({
   const [notice, setNotice] = useState<string | null>(null);
   const [openPanel, setOpenPanel] = useState<'none' | 'ws' | 'perm'>('none');
   const [restarting, setRestarting] = useState(false);
+  const toolsRef = useRef<HTMLSpanElement | null>(null);
+  const [popBox, setPopBox] = useState<{ right: number; bottom: number } | null>(null);
+  useLayoutEffect(() => {
+    if (openPanel === 'none') {
+      setPopBox(null);
+      return;
+    }
+    const place = () => {
+      const r = toolsRef.current?.getBoundingClientRect();
+      if (!r) return;
+      setPopBox({ right: Math.max(12, window.innerWidth - r.right), bottom: Math.max(12, window.innerHeight - r.top + 8) });
+    };
+    place();
+    window.addEventListener('resize', place);
+    window.addEventListener('scroll', place, true);
+    return () => {
+      window.removeEventListener('resize', place);
+      window.removeEventListener('scroll', place, true);
+    };
+  }, [openPanel]);
   const [onlyThis, setOnlyThis] = useState(false);
   const [wsDraft, setWsDraft] = useState('');
   // 展示成相对任务工作区的路径, 太长时更好读
@@ -309,69 +329,6 @@ export function Conversation({
         ) : null}
       </div>
 
-      {openPanel === 'ws' && current ? (
-        <div className="conv-settings">
-          <div className="cs-row cs-row-stack">
-            <span className="cs-label">工作目录</span>
-            <div className="cs-fields">
-              <input
-                className="cs-input"
-                value={wsDraft}
-                placeholder="绝对路径, 或相对任务工作区(例如 planner/claude); 留空 = 自动分配"
-                onChange={(e) => setWsDraft(e.target.value)}
-              />
-              <div className="cs-actions">
-                <button type="button" className="btn tiny" onClick={() => setPickingWs(true)}>
-                  选择…
-                </button>
-                {runningSessionId ? (
-                  <button type="button" className="btn tiny" disabled={restarting} onClick={() => void restartSession()}>
-                    {restarting ? '重启中…' : '立即重启会话'}
-                  </button>
-                ) : null}
-                <button className="btn primary tiny" disabled={saving} onClick={() => void saveWorkspace()}>
-                  {saving ? '保存中…' : '保存工作区'}
-                </button>
-              </div>
-            </div>
-          </div>
-          <p className="small muted cs-hint">
-            留空 = <code>{"<大工作区>/"}{current.role === 'strong' ? 'planner' : 'worker'}/{"<席位名>"}</code>;
-            也可以填相对任务工作区的路径(例如 <code>worker/experiments</code>)或绝对路径。改动对下一个回合生效;
-            席位正在跑时可以点「立即重启会话」马上切换。
-          </p>
-          {notice ? <div className="cs-notice">{notice}</div> : null}
-        </div>
-      ) : null}
-
-      {openPanel === 'perm' && current ? (
-        <div className="conv-settings">
-          <div className="cs-row">
-            <span className="cs-label">会话权限</span>
-            <select value={sandboxDraft} onChange={(e) => setSandboxDraft(e.target.value as SandboxMode)}>
-              {(Object.keys(SANDBOX_LABEL) as SandboxMode[]).map((m) => (
-                <option key={m} value={m}>
-                  {SANDBOX_LABEL[m]}
-                </option>
-              ))}
-            </select>
-            {runningSessionId ? (
-              <button type="button" className="btn tiny" disabled={restarting} onClick={() => void restartSession()}>
-                {restarting ? '重启中…' : '立即重启会话'}
-              </button>
-            ) : null}
-            <button className="btn primary tiny" disabled={saving} onClick={() => void savePermission()}>
-              {saving ? '保存中…' : '保存权限'}
-            </button>
-          </div>
-          <p className="small muted cs-hint">
-            权限由 harness 原生能力执行: Codex 用沙箱、Claude 用 permissionMode + 工具放行、DSH 只能靠提示词与事后审计。
-            改动在下一个回合生效, 正在跑的会话不受影响。
-          </p>
-          {notice ? <div className="cs-notice">{notice}</div> : null}
-        </div>
-      ) : null}
-
       <div className="conv-scroll" ref={scrollRef}>
         {visible.length === 0 ? (
           <div className="empty">
@@ -463,7 +420,85 @@ export function Conversation({
               : '统一主对话'}
             </span>
           </span>
-          <span className="composer-tools">
+          <span className="composer-tools-wrap" ref={toolsRef}>
+            {openPanel !== 'none' && current ? (
+              <div
+                className="cs-popover"
+                role="dialog"
+                aria-label="席位设置"
+                style={{
+                  position: 'fixed',
+                  right: popBox?.right ?? 16,
+                  bottom: popBox?.bottom ?? 120,
+                  width: 'min(420px, calc(100vw - 24px))',
+                  zIndex: 60,
+                }}
+              >
+                {openPanel === 'ws' && current ? (
+                        <div className="conv-settings">
+                          <div className="cs-row cs-row-stack">
+                            <span className="cs-label">工作目录</span>
+                            <div className="cs-fields">
+                              <input
+                                className="cs-input"
+                                value={wsDraft}
+                                placeholder="绝对路径, 或相对任务工作区(例如 planner/claude); 留空 = 自动分配"
+                                onChange={(e) => setWsDraft(e.target.value)}
+                              />
+                              <div className="cs-actions">
+                                <button type="button" className="btn tiny" onClick={() => setPickingWs(true)}>
+                                  选择…
+                                </button>
+                                {runningSessionId ? (
+                                  <button type="button" className="btn tiny" disabled={restarting} onClick={() => void restartSession()}>
+                                    {restarting ? '重启中…' : '立即重启会话'}
+                                  </button>
+                                ) : null}
+                                <button className="btn primary tiny" disabled={saving} onClick={() => void saveWorkspace()}>
+                                  {saving ? '保存中…' : '保存工作区'}
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                          <p className="small muted cs-hint">
+                            留空 = <code>{"<大工作区>/"}{current.role === 'strong' ? 'planner' : 'worker'}/{"<席位名>"}</code>;
+                            也可以填相对任务工作区的路径(例如 <code>worker/experiments</code>)或绝对路径。改动对下一个回合生效;
+                            席位正在跑时可以点「立即重启会话」马上切换。
+                          </p>
+                          {notice ? <div className="cs-notice">{notice}</div> : null}
+                        </div>
+                      ) : null}
+                
+                      {openPanel === 'perm' && current ? (
+                        <div className="conv-settings">
+                          <div className="cs-row">
+                            <span className="cs-label">会话权限</span>
+                            <select value={sandboxDraft} onChange={(e) => setSandboxDraft(e.target.value as SandboxMode)}>
+                              {(Object.keys(SANDBOX_LABEL) as SandboxMode[]).map((m) => (
+                                <option key={m} value={m}>
+                                  {SANDBOX_LABEL[m]}
+                                </option>
+                              ))}
+                            </select>
+                            {runningSessionId ? (
+                              <button type="button" className="btn tiny" disabled={restarting} onClick={() => void restartSession()}>
+                                {restarting ? '重启中…' : '立即重启会话'}
+                              </button>
+                            ) : null}
+                            <button className="btn primary tiny" disabled={saving} onClick={() => void savePermission()}>
+                              {saving ? '保存中…' : '保存权限'}
+                            </button>
+                          </div>
+                          <p className="small muted cs-hint">
+                            权限由 harness 原生能力执行: Codex 用沙箱、Claude 用 permissionMode + 工具放行、DSH 只能靠提示词与事后审计。
+                            改动在下一个回合生效, 正在跑的会话不受影响。
+                          </p>
+                          {notice ? <div className="cs-notice">{notice}</div> : null}
+                        </div>
+                      ) : null}
+              </div>
+            ) : null}
+            <span className="composer-tools">
             <button
               type="button"
               className={`btn tiny ${openPanel === 'ws' ? 'on' : ''}`}
@@ -496,6 +531,7 @@ export function Conversation({
             <option value="answer">回答追问</option>
             <option value="supplement">补充 / 要求修改</option>
           </select>
+            </span>
           </span>
         </div>
         {pendingFiles.length > 0 ? (
