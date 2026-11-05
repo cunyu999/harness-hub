@@ -48,7 +48,15 @@ export function useTask(taskId: string | null): TaskState {
         setError(null);
         return d;
       } catch (e) {
-        setError(e instanceof Error ? e.message : String(e));
+        const text = e instanceof Error ? e.message : String(e);
+        // 任务已被删除: 清掉本地记住的 id, 不要把"不存在"当成错误一直挂着
+        if (/不存在|not_found|404/.test(text)) {
+          localStorage.removeItem('hh.taskId');
+          setDetail(null);
+          setError(null);
+          return null;
+        }
+        setError(text);
         return null;
       }
     },
