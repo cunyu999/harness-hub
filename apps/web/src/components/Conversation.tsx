@@ -4,6 +4,8 @@ import { api } from '../api';
 import type { StreamDelta } from '../store';
 import { clock, initials, shortId } from '../lib/format';
 import { DirectoryPicker } from './DirectoryPicker';
+import type { EventEnvelope } from '../../../../packages/contracts/src/events';
+import { liveStatus } from '../lib/live';
 
 type SandboxMode = 'read-only' | 'workspace-write' | 'danger-full-access';
 
@@ -45,6 +47,7 @@ function MessageBody({ text, kind }: { text: string; kind: string }) {
 export function Conversation({
   detail,
   deltas,
+  events,
   onChanged,
   target,
   onTargetChange,
@@ -52,6 +55,7 @@ export function Conversation({
 }: {
   detail: TaskDetail;
   deltas: StreamDelta[];
+  events: EventEnvelope[];
   onChanged: () => void;
   target: string | null;
   onTargetChange: (participantId: string | null) => void;
@@ -141,6 +145,13 @@ export function Conversation({
   const participants = detail.participants ?? [];
   const lead = participants.find((p) => p.isLead) ?? null;
   const currentId = target ?? lead?.id ?? null;
+  const [tick, setTick] = useState(() => Date.now());
+  const live = liveStatus(detail, events, currentId, tick);
+  useEffect(() => {
+    if (!live || live.tone !== 'run') return undefined;
+    const t = window.setInterval(() => setTick(Date.now()), 1000);
+    return () => window.clearInterval(t);
+  }, [live?.tone, live?.label]);
   const current = participants.find((p) => p.id === currentId) ?? lead;
   const isLeadTarget = !!current && current.isLead;
 
@@ -573,6 +584,16 @@ export function Conversation({
             </span>
           </span>
         </div>
+        {live ? (
+          <div className={'conv-live ' + live.tone}>
+            <span className="dot" />
+            <b>{live.label}</b>
+            {live.detail ? <span className="live-detail">{live.detail}</span> : null}
+            {live.since ? (
+              <span className="live-time">{fmtElapsed(tick - live.since)}</span>
+            ) : null}
+          </div>
+        ) : null}
         {pendingFiles.length > 0 ? (
           <div className="attach-row">
             {pendingFiles.map((f) => (
@@ -664,4 +685,12 @@ export function Conversation({
       ) : null}
     </div>
   );
+}
+
+function fmtElapsed(ms: number): string {
+  const t = Math.max(0, Math.round(ms / 1000));
+  if (t < 60) return t + 's';
+  const m = Math.floor(t / 60);
+  const r = t % 60;
+  return m + 'm' + String(r).padStart(2, '0') + 's';
 }

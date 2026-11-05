@@ -352,6 +352,7 @@ export function App() {
                 <Conversation
                   detail={detail}
                   deltas={state.deltas}
+                  events={state.events}
                   onChanged={refresh}
                   target={chatTarget}
                   onTargetChange={setChatTarget}
