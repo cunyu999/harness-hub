@@ -14,6 +14,7 @@ import {
   type ArtifactRevision,
   type ExecutionProfile,
   type ManagedSession,
+  type MessageAttachment,
   type Participant,
   type PlanContent,
   type PlanRevision,
@@ -2353,9 +2354,15 @@ export class Engine implements AdapterHost {
 
   async sendUserMessage(
     taskId: string,
-    input: { text: string; intent: string; participantId?: string | null },
+    input: {
+      text: string;
+      intent: string;
+      participantId?: string | null;
+      attachments?: MessageAttachment[] | null;
+    },
   ): Promise<void> {
     const task = this.requireTask(taskId);
+    const attachments = input.attachments ?? [];
     this.repo.insertMessage({
       id: newId('msg'),
       taskId,
@@ -2367,7 +2374,15 @@ export class Engine implements AdapterHost {
       kind: input.intent,
       createdAt: nowIso(),
       incomplete: false,
+      attachments: attachments.length > 0 ? attachments : null,
     });
+    // 附件对模型可见: 直接把绝对路径写进正文, 不同 harness 都能用自己熟悉的读文件工具打开
+    const modelText =
+      attachments.length > 0
+        ? `${input.text}\n\n[用户上传的附件, 已保存在工作区, 需要时请直接读取]\n${attachments
+            .map((a) => `- ${a.name} (${a.mediaType}, ${a.size} bytes): ${a.path}`)
+            .join('\n')}`
+        : input.text;
     // 用户点名了某个席位: 这一轮就是和它对话(主控以外的席位不会触发重新计划)
     if (input.participantId) {
       const target = this.repo.getParticipant(input.participantId);
@@ -2376,7 +2391,7 @@ export class Engine implements AdapterHost {
       }
       const lead = this.participantsOf(taskId).find((p) => p.isLead);
       if (!lead || lead.id !== target.id) {
-        void this.chatWith(taskId, target.id, input.text);
+        void this.chatWith(taskId, target.id, modelText);
         return;
       }
     }
@@ -2398,7 +2413,7 @@ export class Engine implements AdapterHost {
           planNumber: this.repo.listPlans(taskId).length,
         },
       });
-      void this.runStage(taskId, 'planning', () => this.planningStage(taskId, 'supplement', input.text));
+      void this.runStage(taskId, 'planning', () => this.planningStage(taskId, 'supplement', modelText));
       return;
     }
 

@@ -3,6 +3,7 @@ import type { TaskDetail } from '../api';
 import { api } from '../api';
 import type { StreamDelta } from '../store';
 import { clock, initials, shortId } from '../lib/format';
+import { DirectoryPicker } from './DirectoryPicker';
 
 type SandboxMode = 'read-only' | 'workspace-write' | 'danger-full-access';
 
@@ -60,6 +61,11 @@ export function Conversation({
   const [text, setText] = useState('');
   const [intent, setIntent] = useState<'chat' | 'instruction' | 'answer' | 'supplement'>('chat');
   const [busy, setBusy] = useState(false);
+  type Pending = { id: string; file: File; preview: string | null };
+  const [pendingFiles, setPendingFiles] = useState<Pending[]>([]);
+  const [dragging, setDragging] = useState(false);
+  const [pickingWs, setPickingWs] = useState(false);
+  const fileRef = useRef<HTMLInputElement | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [showSettings, setShowSettings] = useState(false);
@@ -103,18 +109,65 @@ export function Conversation({
     return messages.filter((m) => m.role === 'user' || m.participantId === current.id);
   }, [messages, onlyThis, current?.id, isLeadTarget]);
 
+  const addFiles = (files: FileList | File[] | null) => {
+    if (!files) return;
+    const next: Pending[] = [];
+    for (const f of Array.from(files).slice(0, 8)) {
+      if (f.size > 30 * 1024 * 1024) {
+        setErr(`${f.name} 超过 30MB, 没有加入`);
+        continue;
+      }
+      next.push({
+        id: `${Date.now()}-${f.name}-${Math.random().toString(36).slice(2, 6)}`,
+        file: f,
+        preview: f.type.startsWith('image/') ? URL.createObjectURL(f) : null,
+      });
+    }
+    if (next.length > 0) setPendingFiles((prev) => [...prev, ...next].slice(0, 8));
+  };
+
+  const readBase64 = (file: File): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = String(reader.result ?? '');
+        resolve(result.slice(result.indexOf(',') + 1));
+      };
+      reader.onerror = () => reject(reader.error ?? new Error('读取文件失败'));
+      reader.readAsDataURL(file);
+    });
+
   const send = async () => {
     const t = text.trim();
-    if (!t) return;
+    if (!t && pendingFiles.length === 0) return;
+    if (!t) {
+      setErr('带附件时也写一句话, 说明希望模型拿这些文件做什么');
+      return;
+    }
     setBusy(true);
     setErr(null);
     try {
+      const uploaded = [];
+      for (const item of pendingFiles) {
+        const dataBase64 = await readBase64(item.file);
+        const ref = await api.uploadAttachment(detail.task.id, {
+          name: item.file.name || 'file',
+          dataBase64,
+          mediaType: item.file.type || undefined,
+        });
+        uploaded.push(ref);
+      }
       await api.sendMessage(detail.task.id, {
         text: t,
         intent: intent === 'supplement' ? 'supplement' : intent,
         participantId: isLeadTarget ? null : (current?.id ?? null),
+        attachments: uploaded,
       });
       setText('');
+      setPendingFiles((prev) => {
+        for (const p2 of prev) if (p2.preview) URL.revokeObjectURL(p2.preview);
+        return [];
+      });
       onChanged();
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
@@ -218,11 +271,16 @@ export function Conversation({
         <div className="conv-settings">
           <div className="cs-row">
             <span className="cs-label">工作目录</span>
-            <input
-              value={wsDraft}
-              placeholder="绝对路径, 或相对任务工作区(例如 planner/claude); 留空 = 自动分配"
-              onChange={(e) => setWsDraft(e.target.value)}
-            />
+            <div className="field-pick">
+              <input
+                value={wsDraft}
+                placeholder="绝对路径, 或相对任务工作区(例如 planner/claude); 留空 = 自动分配"
+                onChange={(e) => setWsDraft(e.target.value)}
+              />
+              <button type="button" className="btn tiny" onClick={() => setPickingWs(true)}>
+                选择…
+              </button>
+            </div>
           </div>
           <div className="cs-row">
             <span className="cs-label">会话权限</span>
@@ -271,6 +329,16 @@ export function Conversation({
               </div>
               <div className="msg-body">
                 <MessageBody text={m.text} kind={m.kind} />
+                {m.attachments && m.attachments.length > 0 ? (
+                  <div className="msg-attach">
+                    {m.attachments.map((a) => (
+                      <span key={a.path} className="attach-chip" title={a.path}>
+                        <span className="attach-name">{a.name}</span>
+                        <span className="small muted">{Math.max(1, Math.round(a.size / 1024))}KB</span>
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
               </div>
             </div>
           );
@@ -302,12 +370,29 @@ export function Conversation({
           </button>
         </div>
       ) : null}
-      <div className="composer">
+      <div
+        className="composer"
+        onDragOver={(e) => {
+          if (e.dataTransfer?.types.includes('Files')) {
+            e.preventDefault();
+            setDragging(true);
+          }
+        }}
+        onDragLeave={() => setDragging(false)}
+        onDrop={(e) => {
+          if (!e.dataTransfer?.files?.length) return;
+          e.preventDefault();
+          setDragging(false);
+          addFiles(e.dataTransfer.files);
+        }}
+      >
         <div className="row" style={{ justifyContent: 'space-between' }}>
           <span className="small muted">
-            {current
+            <span>
+              {current
               ? `正在和 ${current.displayName}(${isLeadTarget ? '主控' : current.role === 'strong' ? '强模型' : '执行者'})对话`
               : '统一主对话'}
+            </span>
           </span>
           <select
             value={intent}
@@ -320,9 +405,40 @@ export function Conversation({
             <option value="supplement">补充 / 要求修改</option>
           </select>
         </div>
+        {pendingFiles.length > 0 ? (
+          <div className="attach-row">
+            {pendingFiles.map((f) => (
+              <span key={f.id} className="attach-chip" title={f.file.name}>
+                {f.preview ? <img src={f.preview} alt={f.file.name} /> : null}
+                <span className="attach-name">{f.file.name}</span>
+                <span className="small muted">{Math.max(1, Math.round(f.file.size / 1024))}KB</span>
+                <button
+                  type="button"
+                  title="移除"
+                  onClick={() =>
+                    setPendingFiles((prev) => {
+                      if (f.preview) URL.revokeObjectURL(f.preview);
+                      return prev.filter((x) => x.id !== f.id);
+                    })
+                  }
+                >
+                  ×
+                </button>
+              </span>
+            ))}
+          </div>
+        ) : null}
+        {dragging ? <div className="drop-hint">松手即添加附件</div> : null}
         <textarea
           ref={inputRef}
           value={text}
+          onPaste={(e) => {
+            const files = Array.from(e.clipboardData?.files ?? []);
+            if (files.length > 0) {
+              e.preventDefault();
+              addFiles(files);
+            }
+          }}
           placeholder={
             intent === 'supplement' && ['completed', 'blocked', 'failed'].includes(detail.task.lifecycle)
               ? '写清楚要改哪里(例如: 第二节太笼统, 换成带步骤的版本), 然后发送 → 会重新出计划让你批准'
@@ -339,13 +455,45 @@ export function Conversation({
             }
           }}
         />
-        <div className="row" style={{ justifyContent: 'flex-end' }}>
-          <button className="btn primary" disabled={busy || text.trim().length === 0} onClick={() => void send()}>
+        <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
+          <span className="composer-attach">
+            <button
+              type="button"
+              className="btn tiny"
+              title="添加文件或图片(也可以直接拖进输入区 / 直接粘贴截图)"
+              onClick={() => fileRef.current?.click()}
+            >
+              + 附件
+            </button>
+            <input
+              ref={fileRef}
+              type="file"
+              multiple
+              style={{ display: 'none' }}
+              onChange={(e) => {
+                addFiles(e.target.files);
+                e.target.value = '';
+              }}
+            />
+            <span className="small muted">文件会存到任务工作区 uploads/ 下</span>
+          </span>
+          <button className="btn primary" disabled={busy || (text.trim().length === 0 && pendingFiles.length === 0)} onClick={() => void send()}>
             {busy ? '发送中…' : isLeadTarget ? '发送给主控' : `发送给 ${current?.displayName ?? '席位'}`}
           </button>
         </div>
         {err ? <div className="err">{err}</div> : null}
       </div>
+      {pickingWs && current ? (
+        <DirectoryPicker
+          title={`选择 ${current.displayName} 的工作目录`}
+          initial={wsDraft.trim() || null}
+          onClose={() => setPickingWs(false)}
+          onPick={(abs) => {
+            setWsDraft(abs);
+            setPickingWs(false);
+          }}
+        />
+      ) : null}
     </div>
   );
 }

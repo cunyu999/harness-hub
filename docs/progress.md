@@ -1,3 +1,9 @@
+## 选择工作区与上传附件
+
+- 工作目录支持目录选择器(GET /api/fs/list 只读列目录 + 前端 DirectoryPicker), 新建任务与对话栏两处都能用。
+- 对话支持附件: POST /api/tasks/:id/attachments 把 base64 落盘到任务工作区 uploads/, 消息带 ttachments(迁移 6 新增 messages.attachments_json); 发模型时把绝对路径写进正文。
+- 测试 57 项(	ests/attachments.test.ts 覆盖落库与 schema 校验)。
+
 # 进度记录
 
 > 每次会话结束前更新本文件, 保证中断后可继续。状态标记: 已实现 / 已验证 / 未验证 / 受阻。

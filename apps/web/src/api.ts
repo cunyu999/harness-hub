@@ -78,7 +78,39 @@ export const api = {
     request<{ status: string }>('POST', `/api/tasks/${id}/plan`, { reason, supplement }),
   planDecision: (id: string, body: Record<string, unknown>) =>
     request<{ decision: string; task: TaskRecord }>('POST', `/api/tasks/${id}/plan-decisions`, body),
-  sendMessage: (id: string, body: { text: string; intent: string; participantId?: string | null }) =>
+  fsList: (path?: string | null) =>
+    request<{
+      path: string | null;
+      parent: string | null;
+      entries: { name: string; path: string; isDir: boolean }[];
+      roots: { label: string; path: string }[];
+      error?: string;
+    }>('GET', `/api/fs/list${path ? `?path=${encodeURIComponent(path)}` : ''}`),
+  uploadAttachment: (taskId: string, file: { name: string; dataBase64: string; mediaType?: string }) =>
+    request<{
+      name: string;
+      path: string;
+      relativePath: string;
+      mediaType: string;
+      size: number;
+      isImage: boolean;
+    }>('POST', `/api/tasks/${taskId}/attachments`, file),
+  sendMessage: (
+    id: string,
+    body: {
+      text: string;
+      intent: string;
+      participantId?: string | null;
+      attachments?: {
+        name: string;
+        path: string;
+        relativePath: string;
+        mediaType: string;
+        size: number;
+        isImage: boolean;
+      }[];
+    },
+  ) =>
     request<{ messageId: string }>('POST', `/api/tasks/${id}/messages`, body),
   updateParticipant: (
     id: string,

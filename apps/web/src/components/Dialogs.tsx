@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { DirectoryPicker } from './DirectoryPicker';
 import type { ProfileDto } from '../api';
 import { api } from '../api';
 import { stamp } from '../lib/format';
@@ -20,6 +21,7 @@ export function NewTaskDialog({
   const [constraints, setConstraints] = useState('');
   const [outputHint, setOutputHint] = useState('');
   const [workspace, setWorkspace] = useState('');
+  const [pickingWorkspace, setPickingWorkspace] = useState(false);
   // 角色默认权限: planner 默认完全权限, worker 默认工作区内可写; 建好任务后仍可在对话栏逐个改
   const [plannerSandbox, setPlannerSandbox] = useState<'read-only' | 'workspace-write' | 'danger-full-access'>(
     'danger-full-access',
@@ -135,12 +137,17 @@ export function NewTaskDialog({
 
         <div className="field">
           <label>工作目录(可留空)</label>
-          <input
-            type="text"
-            value={workspace}
-            onChange={(e) => setWorkspace(e.target.value)}
-            placeholder="例如 D:/projects/my-app; 留空则每个任务用自己的目录"
-          />
+          <div className="field-pick">
+            <input
+              type="text"
+              value={workspace}
+              onChange={(e) => setWorkspace(e.target.value)}
+              placeholder="例如 D:/projects/my-app; 留空则每个任务用自己的目录"
+            />
+            <button className="btn tiny" type="button" onClick={() => setPickingWorkspace(true)}>
+              选择…
+            </button>
+          </div>
           <div className="field-hint">所有参与者共用这个目录, 产物路径相对它计算; 留空时用 .local/runs/&lt;taskId&gt;/workspace。</div>
         </div>
 
@@ -238,6 +245,17 @@ export function NewTaskDialog({
           </button>
         </div>
       </div>
+      {pickingWorkspace ? (
+        <DirectoryPicker
+          title="选择任务工作区"
+          initial={workspace.trim() || null}
+          onClose={() => setPickingWorkspace(false)}
+          onPick={(abs) => {
+            setWorkspace(abs);
+            setPickingWorkspace(false);
+          }}
+        />
+      ) : null}
     </div>
   );
 }

@@ -348,4 +348,10 @@ ALTER TABLE tasks ADD COLUMN workspace_root TEXT;
     sql: `ALTER TABLE participants ADD COLUMN workspace_root TEXT;
 ALTER TABLE participants ADD COLUMN sandbox TEXT;`,
   },
+  {
+    version: 6,
+    name: 'message-attachments',
+    // 用户在对话里上传的文件/图片; 存引用(相对任务工作区), 文件本身在 uploads/ 下。
+    sql: 'ALTER TABLE messages ADD COLUMN attachments_json TEXT;',
+  },
 ];

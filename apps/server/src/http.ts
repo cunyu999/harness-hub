@@ -7,7 +7,7 @@
  * - SSE 以事件 seq 作为 id, 支持 Last-Event-ID / after 断线续传;
  * - 写请求支持 idempotencyKey, 重复提交返回首次结果。
  */
-import { createReadStream, existsSync, statSync } from 'node:fs';
+import { createReadStream, existsSync, mkdirSync, statSync, writeFileSync } from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 import { z } from 'zod';
@@ -29,10 +29,11 @@ import {
 } from '../../../packages/contracts/src/api.js';
 import type { EventEnvelope, TaskSnapshot } from '../../../packages/contracts/src/events.js';
 import { EngineError, type Engine } from '../../../packages/core/src/engine.js';
-import { isInside, mediaTypeFor, newId, nowIso } from '../../../packages/core/src/util.js';
+import { isInside, mediaTypeFor, newId, normalizeRelPath, nowIso } from '../../../packages/core/src/util.js';
 import type { Repo } from '../../../packages/storage/src/repo.js';
 import type { HarnessAdapter } from '../../../packages/adapters/src/types.js';
 import type { AppConfig } from './config.js';
+import { guessMediaType, listDirectory } from './fs.js';
 import { preparePrivateHome } from './homes.js';
 import type { RuntimeControl } from './runtime-control.js';
 
@@ -107,6 +108,9 @@ export class ApiServer {
     this.add('POST', '/api/profiles/:id/probe', (ctx) => this.probeProfile(ctx));
     this.add('GET', '/api/adapters', () => this.listAdapters());
 
+    // 网页里的"选择工作区": 只读列目录
+    this.add('GET', '/api/fs/list', (ctx) => this.listFs(ctx));
+
     this.add('GET', '/api/tasks', () => this.listTasks());
     this.add('POST', '/api/tasks', (ctx) => this.createTask(ctx));
     this.add('GET', '/api/tasks/:id', (ctx) => this.getTask(ctx));
@@ -115,6 +119,7 @@ export class ApiServer {
     this.add('POST', '/api/tasks/:id/plan', (ctx) => this.requestPlan(ctx));
     this.add('POST', '/api/tasks/:id/plan-decisions', (ctx) => this.decidePlan(ctx));
     this.add('POST', '/api/tasks/:id/messages', (ctx) => this.postMessage(ctx));
+    this.add('POST', '/api/tasks/:id/attachments', (ctx) => this.uploadAttachment(ctx));
     this.add('POST', '/api/tasks/:id/controls', (ctx) => this.control(ctx));
     this.add('POST', '/api/tasks/:id/work-items/:itemId/retry', (ctx) => this.retryWorkItem(ctx));
     this.add('PATCH', '/api/tasks/:id/participants/:participantId', (ctx) => this.patchParticipant(ctx));
@@ -582,14 +587,63 @@ export class ApiServer {
 
   private async postMessage(ctx: Ctx) {
     const input = TaskMessageSchema.parse(ctx.body);
+    // 附件引用由上传接口返回, 这里只负责把它们连同消息一起交给引擎
+    const attachments = (input.attachments ?? []) as Parameters<Engine['sendUserMessage']>[1]['attachments'];
     await this.engine.sendUserMessage(ctx.params.id, {
       text: input.text,
       intent: input.intent,
       participantId: input.participantId ?? null,
+      attachments,
     });
     return { ok: true, snapshot: this.engine.snapshot(ctx.params.id) };
   }
 
+  /** 只读列目录, 给"选择工作区"用(不做任何写操作)。 */
+  private async listFs(ctx: Ctx): Promise<unknown> {
+    return listDirectory(ctx.url.searchParams.get('path'));
+  }
+
+  /**
+   * 上传附件: 前端把文件读成 base64 传来, 落到任务工作区的 uploads/ 下。
+   * 走接口而不是前端直接写盘, 是因为浏览器没有本地文件权限, 而且这样能保证
+   * 文件落在本任务工作区里(各席位 cwd 都能读到)。
+   */
+  private async uploadAttachment(ctx: Ctx): Promise<unknown> {
+    const taskId = ctx.params.id;
+    const task = this.repo.getTask(taskId);
+    if (!task) throw new EngineError('task_not_found', '任务不存在', 404);
+
+    const body = ctx.body as { name?: string; dataBase64?: string; mediaType?: string } | null;
+    const name = (body?.name ?? '').trim();
+    const dataBase64 = body?.dataBase64 ?? '';
+    if (!name) throw new EngineError('attachment_name_required', '缺少文件名', 422);
+    if (!dataBase64) throw new EngineError('attachment_empty', '文件内容为空', 422);
+
+    const buf = Buffer.from(dataBase64, 'base64');
+    if (buf.length === 0) throw new EngineError('attachment_empty', '文件内容为空', 422);
+    if (buf.length > 30 * 1024 * 1024) {
+      throw new EngineError('attachment_too_large', '单个附件上限 30MB', 413);
+    }
+
+    const workspace = this.engine.workspaceOf(task);
+    const dir = path.join(workspace, 'uploads');
+    mkdirSync(dir, { recursive: true });
+
+    const safe = name.replace(/[\\/:*?"<>|]/g, '_').slice(0, 120) || 'file';
+    const stamped = Date.now().toString(36) + String.fromCharCode(45) + safe;
+    const abs = path.join(dir, stamped);
+    writeFileSync(abs, buf);
+
+    const mediaType = (body?.mediaType ?? '').trim() || guessMediaType(safe);
+    return {
+      name,
+      path: abs,
+      relativePath: normalizeRelPath(path.join('uploads', stamped)),
+      mediaType,
+      size: buf.length,
+      isImage: mediaType.startsWith('image/'),
+    };
+  }
   private async patchParticipant(ctx: Ctx) {
     const input = ParticipantSettingsSchema.parse(ctx.body);
     const participant = await this.engine.updateParticipantSettings(ctx.params.id, ctx.params.participantId, {

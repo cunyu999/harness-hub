@@ -572,6 +572,16 @@ export interface ApprovalRequest {
 
 export type MessageRole = 'user' | 'lead' | 'participant' | 'system';
 
+/** 用户上传的附件: 文件落在任务工作区的 uploads/ 下, path 是绝对路径, 供各 harness 直接读取。 */
+export interface MessageAttachment {
+  name: string;
+  path: string;
+  relativePath: string;
+  mediaType: string;
+  size: number;
+  isImage: boolean;
+}
+
 export interface TaskMessage {
   id: string;
   taskId: string;
@@ -583,4 +593,5 @@ export interface TaskMessage {
   kind: string;
   createdAt: string;
   incomplete: boolean;
+  attachments?: MessageAttachment[] | null;
 }

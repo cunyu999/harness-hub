@@ -717,7 +717,7 @@ export class Repo {
   insertMessage(m: TaskMessage): void {
     this.db.run(
       `INSERT INTO messages (id, task_id, role, participant_id, session_id, attempt_id, text,
-        kind, created_at, incomplete) VALUES (?,?,?,?,?,?,?,?,?,?)`,
+        kind, created_at, incomplete, attachments_json) VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
       m.id,
       m.taskId,
       m.role,
@@ -728,6 +728,7 @@ export class Repo {
       m.kind,
       m.createdAt,
       m.incomplete ? 1 : 0,
+      m.attachments && m.attachments.length > 0 ? JSON.stringify(m.attachments) : null,
     );
   }
 
@@ -748,6 +749,7 @@ export class Repo {
       kind: r.kind,
       createdAt: r.created_at,
       incomplete: B(r.incomplete),
+      attachments: r.attachments_json ? (JSON.parse(r.attachments_json) as TaskMessage['attachments']) : null,
     }));
   }
 

@@ -157,11 +157,21 @@ export const PlanDecisionSchema = z.object({
 });
 export type PlanDecisionInput = z.infer<typeof PlanDecisionSchema>;
 
+const AttachmentSchema = z.object({
+  name: z.string().min(1).max(200),
+  path: z.string().min(1).max(1000),
+  relativePath: z.string().min(1).max(1000),
+  mediaType: z.string().max(160),
+  size: z.number().int().nonnegative(),
+  isImage: z.boolean(),
+});
+
 export const TaskMessageSchema = z.object({
   text: z.string().min(1).max(20000),
   intent: z.enum(['chat', 'answer', 'supplement', 'instruction']).default('chat'),
   /** 指定和哪个席位对话(留空 = 主控)。 */
   participantId: z.string().max(80).nullable().optional(),
+  attachments: z.array(AttachmentSchema).max(12).optional(),
   idempotencyKey: z.string().min(1).max(200).optional(),
 });
 export type TaskMessageInput = z.infer<typeof TaskMessageSchema>;

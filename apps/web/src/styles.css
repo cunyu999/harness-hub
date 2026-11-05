@@ -2764,3 +2764,188 @@ a.link:hover {
     grid-template-columns: 1fr 1fr;
   }
 }
+
+/* ------------------------- 目录选择器 ------------------------- */
+.dp {
+  background: var(--surface) !important;
+  box-shadow: var(--shadow-3, 0 18px 48px rgba(0,0,0,.28)) !important;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.dp-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.dp-head h3 {
+  margin: 0;
+}
+
+.dp-path {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.dp-current {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  color: var(--text-2);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 6px 8px;
+}
+
+.dp-body {
+  max-height: min(52vh, 420px);
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.dp-list,
+.dp-roots {
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+  gap: 2px;
+}
+
+.dp-entry {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 9px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.dp-entry:hover {
+  background: var(--surface-2);
+}
+
+.dp-icon {
+  color: var(--accent);
+  font-size: 11px;
+}
+
+.dp-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dp-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+/* 输入框 + "选择"按钮 的组合 */
+.field-pick {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.field-pick input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+/* ------------------------- 对话附件 ------------------------- */
+.composer-attach {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.attach-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 220px;
+  padding: 4px 6px 4px 4px;
+  border: 1px solid var(--line-2);
+  border-radius: 9px;
+  background: var(--surface-2);
+  font-size: 11.5px;
+  color: var(--text-2);
+}
+
+.attach-chip img {
+  width: 26px;
+  height: 26px;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+}
+
+.attach-chip .attach-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attach-chip button {
+  border: none;
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+  padding: 0 2px;
+  font-size: 13px;
+  line-height: 1;
+}
+
+.attach-chip button:hover {
+  color: var(--bad);
+}
+
+.attach-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 4px 2px 0;
+}
+
+.msg-attach {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.msg-attach .attach-chip {
+  background: var(--surface);
+}
+
+.drop-hint {
+  border: 1px dashed var(--accent);
+  border-radius: 10px;
+  padding: 10px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--accent);
+  background: var(--accent-soft);
+}
