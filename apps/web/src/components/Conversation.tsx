@@ -68,7 +68,7 @@ export function Conversation({
   const fileRef = useRef<HTMLInputElement | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const [showSettings, setShowSettings] = useState(false);
+  const [openPanel, setOpenPanel] = useState<'none' | 'ws' | 'perm'>('none');
   const [onlyThis, setOnlyThis] = useState(false);
   const [wsDraft, setWsDraft] = useState('');
   // 展示成相对任务工作区的路径, 太长时更好读
@@ -95,7 +95,7 @@ export function Conversation({
     if (!current) return;
     setWsDraft(toRelative(current.workspaceRoot));
     setSandboxDraft((current.sandbox as SandboxMode) ?? 'workspace-write');
-    setShowSettings(false);
+    setOpenPanel('none');
     setNotice(null);
   }, [current?.id, current?.workspaceRoot, current?.sandbox]);
 
@@ -256,9 +256,6 @@ export function Conversation({
               </option>
             ))}
         </select>
-        <button className="btn tiny" onClick={() => setShowSettings((v) => !v)}>
-          {showSettings ? '收起设置' : '工作区 / 权限'}
-        </button>
         {!isLeadTarget ? (
           <label className="small muted row" style={{ gap: 5, alignItems: 'center' }}>
             <input type="checkbox" checked={onlyThis} onChange={(e) => setOnlyThis(e.target.checked)} />
@@ -267,7 +264,7 @@ export function Conversation({
         ) : null}
       </div>
 
-      {showSettings && current ? (
+      {openPanel === 'ws' && current ? (
         <div className="conv-settings">
           <div className="cs-row">
             <span className="cs-label">工作目录</span>
@@ -280,8 +277,20 @@ export function Conversation({
               <button type="button" className="btn tiny" onClick={() => setPickingWs(true)}>
                 选择…
               </button>
+              <button className="btn primary tiny" disabled={saving} onClick={() => void saveSettings()}>
+                {saving ? '保存中…' : '保存'}
+              </button>
             </div>
           </div>
+          <p className="small muted cs-hint">
+            只改这个席位的 cwd; 改动在下一个回合生效, 正在跑的会话不受影响。相对路径按任务工作区解析。
+          </p>
+          {notice ? <div className="cs-notice">{notice}</div> : null}
+        </div>
+      ) : null}
+
+      {openPanel === 'perm' && current ? (
+        <div className="conv-settings">
           <div className="cs-row">
             <span className="cs-label">会话权限</span>
             <select value={sandboxDraft} onChange={(e) => setSandboxDraft(e.target.value as SandboxMode)}>
@@ -394,6 +403,23 @@ export function Conversation({
               : '统一主对话'}
             </span>
           </span>
+          <span className="composer-tools">
+            <button
+              type="button"
+              className={`btn tiny ${openPanel === 'ws' ? 'on' : ''}`}
+              title="改这个席位的工作目录"
+              onClick={() => setOpenPanel((v) => (v === 'ws' ? 'none' : 'ws'))}
+            >
+              工作区
+            </button>
+            <button
+              type="button"
+              className={`btn tiny ${openPanel === 'perm' ? 'on' : ''}`}
+              title="改这个席位的会话权限"
+              onClick={() => setOpenPanel((v) => (v === 'perm' ? 'none' : 'perm'))}
+            >
+              权限
+            </button>
           <select
             value={intent}
             onChange={(e) => setIntent(e.target.value as typeof intent)}
@@ -404,6 +430,7 @@ export function Conversation({
             <option value="answer">回答追问</option>
             <option value="supplement">补充 / 要求修改</option>
           </select>
+          </span>
         </div>
         {pendingFiles.length > 0 ? (
           <div className="attach-row">

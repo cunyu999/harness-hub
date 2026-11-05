@@ -2875,6 +2875,18 @@ a.link:hover {
 }
 
 /* ------------------------- 对话附件 ------------------------- */
+.composer-tools {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.composer-tools .btn.tiny.on {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
 .composer-attach {
   display: flex;
   align-items: center;
