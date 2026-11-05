@@ -2961,3 +2961,27 @@ a.link:hover {
   color: var(--accent);
   background: var(--accent-soft);
 }
+
+.cs-row-stack {
+  align-items: stretch;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.cs-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.cs-input {
+  width: 100%;
+}
+
+.cs-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  justify-content: flex-end;
+}

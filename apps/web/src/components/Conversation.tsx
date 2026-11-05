@@ -176,7 +176,8 @@ export function Conversation({
     }
   };
 
-  const saveSettings = async () => {
+  // 两个面板各自只提交自己的字段: 后端把 undefined 当"不改", 所以互不影响
+  const saveWorkspace = async () => {
     if (!current) return;
     setSaving(true);
     setErr(null);
@@ -185,12 +186,25 @@ export function Conversation({
       const ws = wsDraft.trim();
       const res = await api.updateParticipant(detail.task.id, current.id, {
         workspaceRoot: ws.length > 0 ? ws : null,
-        sandbox: sandboxDraft,
       });
       const resolved = (res.participant as { workspaceRoot?: string | null }).workspaceRoot;
-      setNotice(
-        `已保存。${resolved ? `工作目录: ${resolved}` : '工作目录已回到自动分配'} · 权限: ${SANDBOX_LABEL[sandboxDraft]}。改动在下一个回合生效。`,
-      );
+      setNotice(resolved ? `工作目录已保存: ${resolved}, 下一个回合生效。` : '工作目录已回到自动分配, 下一个回合生效。');
+      onChanged();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const savePermission = async () => {
+    if (!current) return;
+    setSaving(true);
+    setErr(null);
+    setNotice(null);
+    try {
+      await api.updateParticipant(detail.task.id, current.id, { sandbox: sandboxDraft });
+      setNotice(`权限已保存: ${SANDBOX_LABEL[sandboxDraft]}, 下一个回合生效。`);
       onChanged();
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
@@ -266,20 +280,23 @@ export function Conversation({
 
       {openPanel === 'ws' && current ? (
         <div className="conv-settings">
-          <div className="cs-row">
+          <div className="cs-row cs-row-stack">
             <span className="cs-label">工作目录</span>
-            <div className="field-pick">
+            <div className="cs-fields">
               <input
+                className="cs-input"
                 value={wsDraft}
                 placeholder="绝对路径, 或相对任务工作区(例如 planner/claude); 留空 = 自动分配"
                 onChange={(e) => setWsDraft(e.target.value)}
               />
-              <button type="button" className="btn tiny" onClick={() => setPickingWs(true)}>
-                选择…
-              </button>
-              <button className="btn primary tiny" disabled={saving} onClick={() => void saveSettings()}>
-                {saving ? '保存中…' : '保存'}
-              </button>
+              <div className="cs-actions">
+                <button type="button" className="btn tiny" onClick={() => setPickingWs(true)}>
+                  选择…
+                </button>
+                <button className="btn primary tiny" disabled={saving} onClick={() => void saveWorkspace()}>
+                  {saving ? '保存中…' : '保存工作区'}
+                </button>
+              </div>
             </div>
           </div>
           <p className="small muted cs-hint">
@@ -300,8 +317,8 @@ export function Conversation({
                 </option>
               ))}
             </select>
-            <button className="btn primary tiny" disabled={saving} onClick={() => void saveSettings()}>
-              {saving ? '保存中…' : '保存'}
+            <button className="btn primary tiny" disabled={saving} onClick={() => void savePermission()}>
+              {saving ? '保存中…' : '保存权限'}
             </button>
           </div>
           <p className="small muted cs-hint">
@@ -408,7 +425,10 @@ export function Conversation({
               type="button"
               className={`btn tiny ${openPanel === 'ws' ? 'on' : ''}`}
               title="改这个席位的工作目录"
-              onClick={() => setOpenPanel((v) => (v === 'ws' ? 'none' : 'ws'))}
+              onClick={() => {
+                setNotice(null);
+                setOpenPanel((v) => (v === 'ws' ? 'none' : 'ws'));
+              }}
             >
               工作区
             </button>
@@ -416,7 +436,10 @@ export function Conversation({
               type="button"
               className={`btn tiny ${openPanel === 'perm' ? 'on' : ''}`}
               title="改这个席位的会话权限"
-              onClick={() => setOpenPanel((v) => (v === 'perm' ? 'none' : 'perm'))}
+              onClick={() => {
+                setNotice(null);
+                setOpenPanel((v) => (v === 'perm' ? 'none' : 'perm'));
+              }}
             >
               权限
             </button>
