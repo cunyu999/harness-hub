@@ -88,26 +88,25 @@ export function listDirectory(input: string | null | undefined): FsListing {
  * 服务在本机跑, 所以弹的是宿主机上的原生对话框; 取消返回 null。
  * 非 Windows 或调用失败时抛错, 由调用方回退到网页内的目录浏览。
  */
-export function pickDirectoryNative(initial?: string | null): Promise<string | null> {
+export function pickDirectoryNative(initial: string | null | undefined, scriptPath: string): Promise<string | null> {
   if (process.platform !== 'win32') {
     return Promise.reject(new Error('当前平台没有 Windows 文件夹选择框'));
   }
   const start = (initial ?? '').trim() || os.homedir();
-  const script = [
-    'Add-Type -AssemblyName System.Windows.Forms | Out-Null',
-    '$d = New-Object System.Windows.Forms.FolderBrowserDialog',
-    "$d.Description = '选择这个任务/席位的工作目录'",
-    '$d.ShowNewFolderButton = $true',
-    `$d.SelectedPath = ${JSON.stringify(start)}`,
-    "if ($d.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { 'SELECTED:' + $d.SelectedPath }",
-  ].join('; ');
+  const args = [
+    '-NoProfile',
+    '-STA',
+    '-NonInteractive',
+    '-ExecutionPolicy',
+    'Bypass',
+    '-File',
+    scriptPath,
+    '-Initial',
+    start,
+  ];
 
   return new Promise<string | null>((resolve, reject) => {
-    const child = spawn(
-      'powershell.exe',
-      ['-NoProfile', '-STA', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', script],
-      { windowsHide: false, stdio: ['ignore', 'pipe', 'pipe'] },
-    );
+    const child = spawn('powershell.exe', args, { windowsHide: false, stdio: ['ignore', 'pipe', 'pipe'] });
     let out = '';
     let err = '';
     let settled = false;
@@ -120,7 +119,7 @@ export function pickDirectoryNative(initial?: string | null): Promise<string | n
         /* ignore */
       }
       reject(new Error('打开系统文件夹选择框超时'));
-    }, 300_000);
+    }, 600_000);
 
     child.stdout?.on('data', (b: Buffer) => {
       out += b.toString();

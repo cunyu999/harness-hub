@@ -615,7 +615,7 @@ export class ApiServer {
     const body = (ctx.body ?? {}) as { initial?: unknown };
     const initial = typeof body.initial === 'string' ? body.initial : null;
     try {
-      const picked = await pickDirectoryNative(initial);
+      const picked = await pickDirectoryNative(initial, path.join(this.cfg.root, 'scripts', 'pick-folder.ps1'));
       return { path: picked };
     } catch (e) {
       throw new EngineError(
