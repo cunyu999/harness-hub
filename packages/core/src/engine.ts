@@ -1588,6 +1588,17 @@ export class Engine implements AdapterHost {
     this.repo.updateWorkItem(item.id, { attemptCount: item.attemptCount + 1, userNote: null });
 
     if (outcome.status !== 'completed') {
+      // harness 中途崩掉(典型: session/prompt 返回空结果)时, 只要本工作项声明的产物齐备、
+      // 验证命令也通过, 就以"产物为准"接受, 不把已经可验证的成果判成失败。
+      const salvaged = await this.salvageAcceptedWork(task, item, outcome);
+      if (salvaged) {
+        this.repo.updateWorkItem(item.id, { result: salvaged });
+        this.emit('work_item.result', { taskId, payload: { workItemId: item.id, result: salvaged } });
+        const paths = unique([...salvaged.artifactRefs, ...item.outputSpecs.map((spec) => spec.relativePath)]);
+        this.registerArtifacts(task, item, this.latestAttemptId(item.id), salvaged.summary, paths);
+        await this.verifyWorkItem(task, this.repo.getWorkItem(item.id)!);
+        return;
+      }
       await this.handleAttemptFailure(task, this.repo.getWorkItem(item.id)!, outcome);
       return;
     }
@@ -1643,6 +1654,46 @@ export class Engine implements AdapterHost {
     ]);
     this.registerArtifacts(task, item, this.latestAttemptId(item.id), result.summary, paths);
     await this.verifyWorkItem(task, this.repo.getWorkItem(item.id)!);
+  }
+
+  /**
+   * 回合失败时的兜底: 若工作项声明的输出都已存在且验证通过, 合成一个"completed"结果。
+   * 只对整个流程可见的确定性证据(文件存在 + 验证命令通过)生效, 不做任何推测。
+   */
+  private async salvageAcceptedWork(
+    task: TaskRecord,
+    item: WorkItem,
+    outcome: TurnOutcome,
+  ): Promise<WorkItemResult | null> {
+    if (item.outputSpecs.length === 0) return null;
+    const taskId = task.id;
+    this.registerArtifacts(task, item, this.latestAttemptId(item.id), 'salvaged-after-crash', item.outputSpecs.map((s) => s.relativePath));
+    await this.verifyWorkItem(task, this.repo.getWorkItem(item.id)!);
+    const fresh = this.repo.getWorkItem(item.id);
+    if (!fresh || fresh.state === 'failed') return null;
+    const checks = this.repo.listVerifications(taskId).filter((v) => v.workItemId === item.id);
+    if (checks.length === 0 || checks.some((c) => c.status !== 'passed')) return null;
+    const artifacts = this.repo
+      .listArtifacts(taskId)
+      .filter((a) => a.status === 'registered' && a.workItemId === item.id);
+    if (artifacts.length === 0) return null;
+    this.emit('error.reported', {
+      taskId,
+      payload: {
+        code: 'harness_crashed_but_verified',
+        message: `harness 未返回结构化结果(${outcome.errorClass ?? 'unknown'}), 但产物齐备且验证通过, 已按产物接受本工作项`,
+      },
+    });
+    return {
+      workItemId: item.planItemId,
+      attemptId: this.latestAttemptId(item.id) ?? '',
+      status: 'completed',
+      summary: `harness 未返回结构化结果(${outcome.errorClass ?? 'unknown'}); 产物齐备且验证通过, 按产物接受`,
+      artifactRefs: artifacts.map((a) => a.relativePath),
+      changes: [],
+      verificationClaims: checks.map((c) => ({ check: c.checkId, status: 'passed' as const, evidenceRef: c.id })),
+      unresolvedIssues: [],
+    };
   }
 
   private latestAttemptId(workItemId: string): string | null {
@@ -1820,7 +1871,11 @@ export class Engine implements AdapterHost {
         }
 
         const cmd = await this.runValidationCommand(workspace, spec.validationCommand, task.id);
-        if (cmd.exitCode !== 0) allPassed = false;
+        // 退出码 0 不等于检查真的做了: cmd 工具参数写错时仍可能返回 0
+        // (例如 findstr "Hello, World!" file 会被拆成多个文件参数, 报 Cannot open 却搜到了别的串)。
+        const noise = validationOutputNoise(cmd.output);
+        const passed = cmd.exitCode === 0 && !noise;
+        if (!passed) allPassed = false;
         results.push(
           this.recordVerification(
             task,
@@ -1828,10 +1883,12 @@ export class Engine implements AdapterHost {
             setHash,
             `cmd:${spec.relativePath}`,
             spec.validationCommand,
-            cmd.exitCode === 0 ? 'passed' : 'failed',
+            passed ? 'passed' : 'failed',
             '',
             cmd.exitCode,
-            trim(cmd.output).slice(0, 1000),
+            noise
+              ? `命令输出包含失败特征, 不认为验证通过: ${trim(cmd.output).slice(0, 900)}`
+              : trim(cmd.output).slice(0, 1000),
           ),
         );
       }
@@ -2831,6 +2888,27 @@ function resolveTaskWorkspace(input: string | null): string | null {
   const text = input?.trim();
   if (!text) return null;
   return path.isAbsolute(text) ? path.normalize(text) : path.resolve(text);
+}
+
+/**
+ * 命令"跑完但没真的检查"的典型特征。命中任一条就不能算验证通过, 即使退出码是 0 -
+ * 这些通常是 cmd/PowerShell 工具在参数错误时的输出(真实 E2E 里出现过 findstr 假通过)。
+ */
+const VALIDATION_NOISE = [
+  'FINDSTR: Cannot open',
+  'FINDSTR: 无法打开',
+  'is not recognized as an internal or external command',
+  '不是内部或外部命令',
+  '系统找不到指定的路径',
+  'Access is denied',
+  '拒绝访问',
+  'The syntax of the command is incorrect',
+  '命令语法不正确',
+];
+
+function validationOutputNoise(output: string): boolean {
+  const text = output.toLowerCase();
+  return VALIDATION_NOISE.some((needle) => text.includes(needle.toLowerCase()));
 }
 
 function isProcessAlive(pid: number): boolean {  try {

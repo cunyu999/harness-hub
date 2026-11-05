@@ -74,6 +74,8 @@ interface NodeModel {
   select?: 'plan' | 'delivery';
 }
 
+const ORDINALS = ['一', '二', '三', '四', '五', '六', '七', '八', '九'];
+
 interface Wire {
   key: string;
   d: string;
@@ -290,10 +292,10 @@ export function CollabGraph({
 
           {others.length > 0 ? (
             <div className="cy-tier cy-tier-seats">
-              {others.map((s) => (
+              {others.map((s, i) => (
                 <NodeCard
                   key={s.key}
-                  node={nodeOfSeat(s)}
+                  node={nodeOfSeat(s, i)}
                   now={now}
                   selected={selection?.kind === 'participant' && selection.id === s.participant.id}
                   onSelect={() => onSelect({ kind: 'participant', id: s.participant.id })}
@@ -344,7 +346,7 @@ function stateColor(state: string): string {
   return 'var(--line-2)';
 }
 
-function nodeOfSeat(seat: Seat): NodeModel {
+function nodeOfSeat(seat: Seat, ordinal?: number): NodeModel {
   const total = seat.works.length;
   const accepted = seat.works.filter((w) => w.state === 'accepted').length;
   const elapsed = seat.elapsedMs === null ? '—' : duration(seat.elapsedMs);
@@ -353,7 +355,7 @@ function nodeOfSeat(seat: Seat): NodeModel {
     key: `seat-${seat.key}`,
     kind: seat.root ? 'root' : 'seat',
     seat,
-    title: seat.name,
+    title: ordinal === undefined ? seat.name : `${ORDINALS[ordinal] ?? ordinal + 1}、${seat.name}`,
     sub: `${seat.roleLabel} · ${HARNESS_SHORT[seat.harness] ?? seat.harness}${seat.model ? ` · ${seat.model}` : ''}`,
     big: `${elapsed} · ${
       total > 0 ? `${total} 项` : seat.root ? '调度' : seat.roleLabel === '强模型' ? '审核' : '待派发'

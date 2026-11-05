@@ -154,6 +154,22 @@
 - 没有工作项的席位, 大字改为角色语义(主控「调度」/ 强模型「审核」/ 执行者「待派发」), 不再写「0 项」;
 - 用「双强模型 + 执行者」的 mock 任务回归: 计划 → 讨论 → 交叉审核 → 交付全部走通, 两席位 approve 且各交叉复核 1 条。
 
+## 真实 E2E: C++ Hello World(Claude Code 主控 + DeepSeek Harness 执行)
+
+- 任务 `task_1f0752f6cfb74a81be85`: 计划 v1(1 个工作项) → Claude 规划并批准 → DSH 写 hello.cpp、
+  用 g++ 编译成 `deliverables\hello.exe`、运行并记录真实输出 → Claude 审核 approve → 交付;
+- 结果: `delivery/completed`, 工作项 1/1 accepted, 4 个产物(hello.cpp 97B、hello.exe 53.4KB、
+  verification.md、DELIVERY.md); 我在工作区直接运行 `deliverables\hello.exe` 得到 `Hello, World!`、退出码 0;
+- 过程中暴露并修掉两个真问题:
+  - **harness 崩溃但产物已齐**: DSH 最后一回合返回空结果(`prompt_failed`), 原先直接判工作项失败;
+    现在只要本工作项声明的输出都存在且验证通过, 就以"产物为准"接受, 并记
+    `error.reported{code:'harness_crashed_but_verified'}` 便于追溯(单测 `tests/salvage.test.ts`);
+  - **验证命令假通过**: 模型把 `findstr "Hello, World!" file` 写进 validationCommand, cmd 把引号拆成多个
+    文件参数 → 打印 `FINDSTR: Cannot open World!"` 但退出码仍是 0, 旧逻辑记 passed。现在除退出码外还检查
+    输出里的失败特征(FINDSTR 打不开、不是内部或外部命令、拒绝访问等), 命中即判失败并写清原因
+    (单测 `tests/validation-noise.test.ts`);
+- 计划提示同步补了一条: `findstr` 必须写 `/c:"整串"`, 只写 `findstr "Hello, World!" file` 必然报错。
+
 ## 进行中
 
 - 无。真实任务验收(E2E-01/E2E-02)等待用户明确授权(m01951 选择"暂不授权")。
