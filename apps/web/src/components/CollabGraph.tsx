@@ -355,7 +355,9 @@ function nodeOfSeat(seat: Seat): NodeModel {
     seat,
     title: seat.name,
     sub: `${seat.roleLabel} · ${HARNESS_SHORT[seat.harness] ?? seat.harness}${seat.model ? ` · ${seat.model}` : ''}`,
-    big: `${elapsed} · ${total} 项`,
+    big: `${elapsed} · ${
+      total > 0 ? `${total} 项` : seat.root ? '调度' : seat.roleLabel === '强模型' ? '审核' : '待派发'
+    }`,
     foot: `${seat.stateLabel} · ${last}`,
     pct: total > 0 ? Math.round((accepted / total) * 100) : null,
     tone: seat.tone,
@@ -506,6 +508,18 @@ function buildSeats(detail: TaskDetail, events: EventEnvelope[]): Seat[] {
       } else {
         tone = 'idle';
         stateLabel = '空闲';
+      }
+    } else if (attempts.length > 0) {
+      const last = attempts[0];
+      if (last.status === 'completed') {
+        tone = 'ok';
+        stateLabel = '已完成';
+      } else if (last.status === 'failed' || last.status === 'interrupted') {
+        tone = 'bad';
+        stateLabel = '失败';
+      } else {
+        tone = 'wait';
+        stateLabel = '等待';
       }
     } else if (item) {
       if (item.state === 'accepted') {
