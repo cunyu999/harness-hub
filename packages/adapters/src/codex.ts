@@ -20,7 +20,7 @@ import {
   type TurnRequest,
 } from './types.js';
 import { newId, sha256Text } from '../../core/src/util.js';
-import { resolveLauncher } from './exec.js';
+import { buildChildEnv, resolveLauncher, spawnHarness } from './exec.js';
 
 /**
  * 权限模式 → Codex 的审批策略。
@@ -70,19 +70,14 @@ export class CodexAdapter implements HarnessAdapter {
 
   private childEnv(profile: ExecutionProfile, extra: Record<string, string>): Record<string, string> {
     const home = this.homeDirFor(profile);
-    const base: Record<string, string> = {};
-    for (const [k, v] of Object.entries(process.env)) {
-      if (typeof v === 'string') base[k] = v;
-    }
-    // 去掉可能把凭据带出项目目录的变量
-    delete base.CODEX_HOME;
-    return {
-      ...base,
+    // buildChildEnv 负责大小写去重与关键变量兜底: 缺 SystemRoot/ComSpec 或环境块里
+    // 同时出现 Path/PATH 时, Windows 上的子进程会以 0xC0000142 起不来。
+    return buildChildEnv({
       ...profile.env,
       ...extra,
       CODEX_HOME: home,
       RUST_LOG: 'error',
-    };
+    });
   }
 
   async probe(profile: ExecutionProfile, mode: 'inspect' | 'live'): Promise<ProbeResult> {
@@ -109,11 +104,9 @@ export class CodexAdapter implements HarnessAdapter {
     const checkedAt = new Date().toISOString();
     const warnings: string[] = [];
     const { command, args, entry } = this.spawnArgs(profile);
-    const child = spawn(command, args, {
+    const child = await spawnHarness(command, args, {
       cwd: process.cwd(),
       env: this.childEnv(profile, {}),
-      stdio: ['pipe', 'pipe', 'pipe'],
-      windowsHide: true,
     });
     const stderrChunks: string[] = [];
     let closeReason = '';
@@ -292,11 +285,9 @@ class CodexSession implements AdapterSession {
 
   static async open(opts: OpenSessionOptions, host: AdapterHost, deps: CodexSessionDeps): Promise<CodexSession> {
     const { command, args } = deps.spawnArgs(opts.profile);
-    const child = spawn(command, args, {
+    const child = await spawnHarness(command, args, {
       cwd: opts.cwd,
       env: deps.childEnv(opts.profile, opts.env),
-      stdio: ['pipe', 'pipe', 'pipe'],
-      windowsHide: true,
     });
     const session = new CodexSession(opts, host, deps, child, newId('csx'));
     await session.handshake();

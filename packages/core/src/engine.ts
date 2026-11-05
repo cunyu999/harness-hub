@@ -67,6 +67,8 @@ import {
   unique,
 } from './util.js';
 
+const WINDOWS_DLL_INIT_FAILED = -1073741502;
+
 export class EngineError extends Error {
   constructor(
     readonly code: string,
@@ -1963,41 +1965,57 @@ export class Engine implements AdapterHost {
     command: string,
     taskId: string,
   ): Promise<{ exitCode: number | null; output: string }> {
-    return new Promise((resolve) => {
-      const shell = process.platform === 'win32' ? 'cmd.exe' : '/bin/sh';
-      // 模型常写 Unix 风格的 ./hello.exe, 在 cmd 里会报 "'.' is not recognized";
-      // 这里只做分隔符归一化, 不改变命令语义。
-      const normalized = process.platform === 'win32' ? command.replace(/\.\//g, '.\\') : command;
-      const args = process.platform === 'win32' ? ['/d', '/s', '/c', normalized] : ['-c', normalized];
-      const child = spawn(shell, args, {
-        cwd,
-        windowsHide: true,
-        // 只覆盖临时目录, 其余必须继承: 缺 SystemRoot / PATH / ComSpec 时
-        // Windows 上的 cmd.exe 会直接以 0xc0000142(DLL 初始化失败)退出。
-        env: { ...process.env, ...this.taskSessionEnv(taskId) },
+    const shell = process.platform === 'win32' ? 'cmd.exe' : '/bin/sh';
+    // 模型常写 Unix 风格的 ./hello.exe, 在 cmd 里会报 "'.' is not recognized";
+    // 这里只做分隔符归一化, 不改变命令语义。
+    const normalized = process.platform === 'win32' ? command.replace(/\.\//g, '.\\') : command;
+    const args = process.platform === 'win32' ? ['/d', '/s', '/c', normalized] : ['-c', normalized];
+
+    const once = (): Promise<{ exitCode: number | null; output: string }> =>
+      new Promise((resolve) => {
+        const child = spawn(shell, args, {
+          cwd,
+          windowsHide: true,
+          // 只覆盖临时目录, 其余必须继承: 缺 SystemRoot / PATH / ComSpec 时
+          // Windows 上的 cmd.exe 会直接以 0xc0000142(DLL 初始化失败)退出。
+          env: { ...process.env, ...this.taskSessionEnv(taskId) },
+        });
+        let output = '';
+        const timer = setTimeout(() => {
+          try {
+            child.kill();
+          } catch {
+            /* ignore */
+          }
+        }, 120_000);
+        child.stdout?.on('data', (b: Buffer) => {
+          output += b.toString('utf8');
+        });
+        child.stderr?.on('data', (b: Buffer) => {
+          output += b.toString('utf8');
+        });
+        child.on('error', (err) => {
+          clearTimeout(timer);
+          resolve({ exitCode: null, output: `${output}\n${err.message}` });
+        });
+        child.on('close', (code) => {
+          clearTimeout(timer);
+          resolve({ exitCode: code, output });
+        });
       });
-      let output = '';
-      const timer = setTimeout(() => {
-        try {
-          child.kill();
-        } catch {
-          /* ignore */
-        }
-      }, 120_000);
-      child.stdout?.on('data', (b: Buffer) => {
-        output += b.toString('utf8');
-      });
-      child.stderr?.on('data', (b: Buffer) => {
-        output += b.toString('utf8');
-      });
-      child.on('error', (err) => {
-        clearTimeout(timer);
-        resolve({ exitCode: null, output: `${output}\n${err.message}` });
-      });
-      child.on('close', (code) => {
-        clearTimeout(timer);
-        resolve({ exitCode: code, output });
-      });
+
+    return once().then(async (first) => {
+      // 0xC0000142: Windows 加载器没把头起来(会弹「应用程序无法正常启动」)。
+      // 重试一次, 第二次仍然失败才作为验证失败返回, 并如实写进输出。
+      if (first.exitCode !== WINDOWS_DLL_INIT_FAILED) return first;
+      const second = await once();
+      if (second.exitCode === WINDOWS_DLL_INIT_FAILED) {
+        return {
+          exitCode: second.exitCode,
+          output: `${second.output}\n校验命令连续两次以 0xC0000142(DLL 初始化失败)起不来, 不是命令本身写错; 这是 Windows 环境问题。`,
+        };
+      }
+      return second;
     });
   }
 

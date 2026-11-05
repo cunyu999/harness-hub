@@ -251,3 +251,10 @@
 - 根因: 页面心跳是无请求体的 `POST /api/runtime/heartbeat`, 服务端的写请求校验要求 `Content-Type: application/json`, 于是心跳全部 415; `pageSeen` 一直是 false, 关闭意图与空闲兜底都失效。
 - 修复: 只有"确实带请求体"的写请求才要求 JSON; 前端心跳显式带 `{}`; 新增回归测试(空体 POST 200, 带体但非 JSON 仍 415)。
 - 实测: 打开页面 → `/api/runtime` 显示 `pageSeen:true`; 关闭页面 → 服务 2.5 秒后退出(脚本 `.local/tmp/verify-close.mjs`)。
+
+## 抗 0xC0000142(Windows 子进程起不来)
+
+- 现象: 偶发系统弹窗「应用程序无法正常启动 (0xC0000142)」, 对应的可能是 `node.exe` 或 `cmd.exe`。
+- 定位: 该码是 `STATUS_DLL_INIT_FAILED`, 发生在加载器阶段; 已知诱因包括子进程环境块被污染(Path/PATH 重复、关键变量为空)、以及从"控制台已失效"的父进程继承句柄。实测本机 11 轮 spawn(带 detached 与不带)均正常, 未复现, 因此按"加固 + 自愈"处理。
+- 改动: `packages/adapters/src/exec.ts` 新增 `buildChildEnv()`(去重/清洗/关键变量兜底)与 `spawnHarness()`(0xC0000142 时用最小可信环境重试一次); codex/dsh 的两处 `spawn` 全部改走 `spawnHarness`; `engine.runValidationCommand` 对同一退出码重试一次。
+- 测试: `tests/exec-env.test.ts`(3 项)覆盖去重、空值兜底、非法键丢弃; `npm test` 55/55。

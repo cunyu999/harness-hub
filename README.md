@@ -296,6 +296,10 @@ docs               进度、决策(ADR)、兼容性、验收矩阵与证据、�
 - 不监控本程序之外启动的会话。
 - 不自动发布、不自动推送代码(仓库的发布动作由人工执行)。
 
+## 遇到「应用程序无法正常启动 (0xC0000142)」
+
+这是 Windows 加载器失败, 与本程序的执行配置无关。本程序已做环境清洗并对子进程启动失败自动重试一次; 若仍反复出现, 重启本程序(必要时重启机器)后再试, 详见 [docs/compatibility.md](docs/compatibility.md)。
+
 ## 已知限制
 
 - Codex 在 Windows 上的沙箱 `windowsSandbox/readiness` 报 `updateRequired`; 未经管理员准备时命令隔离较弱

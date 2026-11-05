@@ -1,3 +1,4 @@
+import { spawn, type ChildProcess, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 
@@ -140,4 +141,178 @@ function exeFromShim(shimPath: string): string | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * Windows 上"进程起不来"的退出码: 0xC0000142(STATUS_DLL_INIT_FAILED)。
+ * 表现为系统弹窗「应用程序无法正常启动(0xc0000142)」, 而不是我们代码里的异常。
+ */
+export const WINDOWS_DLL_INIT_FAILED = -1073741502;
+
+/** 环境块里必须存在的 Windows 变量, 缺了子进程可能起不来。 */
+const CRITICAL_ENV = ['SystemRoot', 'windir', 'ComSpec', 'PATH', 'PATHEXT', 'TEMP', 'TMP'];
+
+function pickEnv(source: Record<string, string>, name: string): string | null {
+  const lower = name.toLowerCase();
+  for (const [k, v] of Object.entries(source)) {
+    if (k.toLowerCase() === lower && v) return v;
+  }
+  return null;
+}
+
+/**
+ * 组装子进程环境: 继承当前进程, 合并执行配置里的变量。
+ * - 大小写不敏感去重(Windows 上 `Path`/`PATH` 同时存在会让子进程拿到空 PATH);
+ * - 丢掉非法键(空名、含 `=` 或 NUL)与含 NUL 的值, 否则整个环境块会被截断;
+ * - 关键变量必须非空, 缺了就从当前进程补回来。
+ */
+export function buildChildEnv(extra: Record<string, string> = {}): Record<string, string> {
+  const merged = new Map<string, { key: string; value: string }>();
+  const put = (key: string, value: string) => {
+    if (!key || key.includes('=') || key.includes('\0')) return;
+    if (value.includes('\0')) return;
+    merged.set(key.toLowerCase(), { key, value });
+  };
+
+  for (const [k, v] of Object.entries(process.env)) {
+    if (typeof v === 'string') put(k, v);
+  }
+  for (const [k, v] of Object.entries(extra)) {
+    if (typeof v === 'string') put(k, v);
+  }
+
+  const out: Record<string, string> = {};
+  for (const { key, value } of merged.values()) out[key] = value;
+
+  for (const name of CRITICAL_ENV) {
+    const current = pickEnv(out, name);
+    if (current) continue;
+    const fallback = pickEnv(process.env as Record<string, string>, name);
+    if (fallback) out[name] = fallback;
+  }
+  return out;
+}
+
+export interface SpawnHarnessOptions {
+  cwd?: string;
+  env: Record<string, string>;
+  /** 起不来时的重试次数(默认 1 次, 用最小可信环境重试) */
+  retries?: number;
+}
+
+/** 用最小可信环境重试时保留的变量(其余全部丢弃)。 */
+function minimalEnv(extra: Record<string, string>): Record<string, string> {
+  const keep = [
+    'SystemRoot',
+    'windir',
+    'ComSpec',
+    'PATH',
+    'PATHEXT',
+    'TEMP',
+    'TMP',
+    'USERPROFILE',
+    'APPDATA',
+    'LOCALAPPDATA',
+    'HOMEDRIVE',
+    'HOMEPATH',
+    'NUMBER_OF_PROCESSORS',
+    'PROCESSOR_ARCHITECTURE',
+    'OS',
+  ];
+  const out: Record<string, string> = {};
+  for (const name of keep) {
+    const value = pickEnv(extra, name) ?? pickEnv(process.env as Record<string, string>, name);
+    if (value) out[name] = value;
+  }
+  for (const [k, v] of Object.entries(extra)) {
+    if (keep.some((n) => n.toLowerCase() === k.toLowerCase())) continue;
+    if (k.startsWith('HH_') || k.startsWith('DSH_') || k === 'CODEX_HOME' || k === 'CLAUDE_CONFIG_DIR') out[k] = v;
+  }
+  return out;
+}
+
+/**
+ * 启动一个 harness 子进程, 并把"Windows 起不来"(0xC0000142)转成可重试的失败。
+ *
+ * 真实故障背景: 某些 Windows 会话里子进程会在加载器阶段直接失败(退出码 -1073741502),
+ * 系统弹窗提示「应用程序无法正常启动」。这类失败与程序逻辑无关, 换一份干净的环境
+ * 重启一次通常就能起来; 两次都失败才算真的起不来。
+ */
+export function spawnHarness(
+  command: string,
+  args: string[],
+  options: SpawnHarnessOptions,
+): Promise<ChildProcessWithoutNullStreams> {
+  const retries = options.retries ?? 1;
+  const attempt = (index: number, env: Record<string, string>): Promise<ChildProcessWithoutNullStreams> =>
+    new Promise((resolvePromise, rejectPromise) => {
+      let settled = false;
+      let child: ChildProcessWithoutNullStreams;
+      try {
+        child = spawn(command, args, {
+          cwd: options.cwd,
+          env,
+          stdio: ['pipe', 'pipe', 'pipe'],
+          windowsHide: true,
+        }) as ChildProcessWithoutNullStreams;
+      } catch (err) {
+        rejectPromise(err instanceof Error ? err : new Error(String(err)));
+        return;
+      }
+
+      const cleanup = () => {
+        child.removeListener('exit', onExit);
+        child.removeListener('error', onError);
+      };
+      const retryOrFail = (detail: string) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        try {
+          child.kill();
+        } catch {
+          /* 进程可能已经没了 */
+        }
+        if (index < retries) {
+          // 用最小可信环境重试: 排除"环境块被污染导致加载器失败"这一类原因
+          void attempt(index + 1, minimalEnv(options.env)).then(resolvePromise, rejectPromise);
+          return;
+        }
+        rejectPromise(
+          new Error(
+            `${command} 启动失败(${detail})。这是 Windows 加载器初始化失败(0xC0000142), ` +
+              '通常与子进程环境或系统资源有关, 与执行配置本身无关; 可重试一次, 或重启本程序后再试。',
+          ),
+        );
+      };
+      const onExit = (code: number | null) => {
+        if (!settled && code === WINDOWS_DLL_INIT_FAILED) retryOrFail('0xC0000142');
+        else if (!settled) {
+          settled = true;
+          cleanup();
+          // 正常启动后立刻退出属于业务问题, 交给调用方按"空结果/提前退出"处理
+          resolvePromise(child);
+        }
+      };
+      const onError = (err: Error) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        rejectPromise(err);
+      };
+
+      child.once('exit', onExit);
+      child.once('error', onError);
+      child.once('spawn', () => {
+        // 给加载器一点时间暴露 0xC0000142, 之后就把进程交回去
+        setTimeout(() => {
+          if (settled) return;
+          settled = true;
+          cleanup();
+          resolvePromise(child);
+        }, 1200);
+      });
+    });
+
+  return attempt(0, options.env);
 }

@@ -21,7 +21,7 @@ import {
   type TurnRequest,
 } from './types.js';
 import { newId, sha256Text } from '../../core/src/util.js';
-import { resolveLauncher } from './exec.js';
+import { buildChildEnv, resolveLauncher, spawnHarness } from './exec.js';
 
 export interface DshAdapterOptions {
   /** dsh CLI 入口 (项目内 node_modules/@deepseek-ai/dsh/lib/bin.js) */
@@ -58,19 +58,13 @@ export class DshAdapter implements HarnessAdapter {
   }
 
   private childEnv(profile: ExecutionProfile, extra: Record<string, string>): Record<string, string> {
-    const base: Record<string, string> = {};
-    for (const [k, v] of Object.entries(process.env)) {
-      if (typeof v === 'string') base[k] = v;
-    }
-    delete base.DSH_HOME;
-    return {
-      ...base,
+    return buildChildEnv({
       ...profile.env,
       ...extra,
       DSH_HOME: this.homeFor(profile),
       DSH_TELEMETRY_DISABLED: '1',
       NO_COLOR: '1',
-    };
+    });
   }
 
   async probe(profile: ExecutionProfile, mode: 'inspect' | 'live'): Promise<ProbeResult> {
@@ -97,11 +91,9 @@ export class DshAdapter implements HarnessAdapter {
     const checkedAt = new Date().toISOString();
     const warnings: string[] = [];
     const { command, args, entry } = this.spawnSpec(profile);
-    const child = spawn(command, args, {
+    const child = await spawnHarness(command, args, {
       cwd: profile.workspaceRoot ?? process.cwd(),
       env: this.childEnv(profile, {}),
-      stdio: ['pipe', 'pipe', 'pipe'],
-      windowsHide: true,
     });
     const stderr: string[] = [];
     const rpc = new StdioRpc(child as ChildProcessWithoutNullStreams, {
@@ -314,11 +306,9 @@ class DshSession implements AdapterSession {
 
   static async open(opts: OpenSessionOptions, host: AdapterHost, deps: DshSessionDeps): Promise<DshSession> {
     const { command, args } = deps.spawnSpec(opts.profile);
-    const child = spawn(command, args, {
+    const child = await spawnHarness(command, args, {
       cwd: opts.cwd,
       env: deps.childEnv(opts.profile, opts.env),
-      stdio: ['pipe', 'pipe', 'pipe'],
-      windowsHide: true,
     });
     const session = new DshSession(opts, host, deps, child as ChildProcessWithoutNullStreams, newId('dsh'));
     await session.bootstrap();
