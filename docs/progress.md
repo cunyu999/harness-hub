@@ -268,3 +268,9 @@
 - 定位: 该码是 `STATUS_DLL_INIT_FAILED`, 发生在加载器阶段; 已知诱因包括子进程环境块被污染(Path/PATH 重复、关键变量为空)、以及从"控制台已失效"的父进程继承句柄。实测本机 11 轮 spawn(带 detached 与不带)均正常, 未复现, 因此按"加固 + 自愈"处理。
 - 改动: `packages/adapters/src/exec.ts` 新增 `buildChildEnv()`(去重/清洗/关键变量兜底)与 `spawnHarness()`(0xC0000142 时用最小可信环境重试一次); codex/dsh 的两处 `spawn` 全部改走 `spawnHarness`; `engine.runValidationCommand` 对同一退出码重试一次。
 - 测试: `tests/exec-env.test.ts`(3 项)覆盖去重、空值兜底、非法键丢弃; `npm test` 55/55。
+
+## 工作区三层结构 + 运行中改目录
+
+- 新建任务填的目录作为大工作区, 自动生成 `planner/<席位>`、`worker/<席位>`、`deliverables/`、`uploads/`;
+- 对话栏「工作区」「权限」两个独立按钮(各自保存), 支持目录浏览选择;
+- 席位正在跑时提供「立即重启会话」: 取消当前会话 → 用新目录重开(实测事件 `attempt.cancel_requested` / `attempt.cancel_confirmed`, 会话从 closed 变 open 且任务继续执行)。

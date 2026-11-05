@@ -148,7 +148,11 @@ export function NewTaskDialog({
               选择…
             </button>
           </div>
-          <div className="field-hint">所有参与者共用这个目录, 产物路径相对它计算; 留空时用 .local/runs/&lt;taskId&gt;/workspace。</div>
+          <div className="field-hint">
+            这个目录就是任务的<strong>大工作区</strong>, 里面会生成三个中层目录:
+            <code>planner/</code>(每个强模型一个子目录)、<code>worker/</code>(每个执行者一个子目录)、
+            <code>deliverables/</code>(所有产物)。留空时用 .local/runs/&lt;taskId&gt;/workspace。
+          </div>
         </div>
 
         <div className="field">

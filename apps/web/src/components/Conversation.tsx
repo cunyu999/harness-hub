@@ -69,6 +69,7 @@ export function Conversation({
   const [err, setErr] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [openPanel, setOpenPanel] = useState<'none' | 'ws' | 'perm'>('none');
+  const [restarting, setRestarting] = useState(false);
   const [onlyThis, setOnlyThis] = useState(false);
   const [wsDraft, setWsDraft] = useState('');
   // 展示成相对任务工作区的路径, 太长时更好读
@@ -176,6 +177,30 @@ export function Conversation({
     }
   };
 
+  // 该席位当前是否有未结束的会话(用于"改动要等下一回合"还是"可以立即重启")
+  const runningSessionId = useMemo(() => {
+    if (!current) return null;
+    const open = (detail.sessions ?? []).filter(
+      (x) => x.participantId === current.id && !x.closedAt,
+    );
+    return open.length > 0 ? open[open.length - 1].id : null;
+  }, [detail.sessions, current?.id]);
+
+  const restartSession = async () => {
+    if (!runningSessionId) return;
+    setRestarting(true);
+    setErr(null);
+    try {
+      await api.control(detail.task.id, 'cancel_session', runningSessionId, 'settings_changed');
+      setNotice('已请求重启该席位的会话; 新的工作区/权限会在它重新开始时生效。');
+      onChanged();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setRestarting(false);
+    }
+  };
+
   // 两个面板各自只提交自己的字段: 后端把 undefined 当"不改", 所以互不影响
   const saveWorkspace = async () => {
     if (!current) return;
@@ -188,7 +213,10 @@ export function Conversation({
         workspaceRoot: ws.length > 0 ? ws : null,
       });
       const resolved = (res.participant as { workspaceRoot?: string | null }).workspaceRoot;
-      setNotice(resolved ? `工作目录已保存: ${resolved}, 下一个回合生效。` : '工作目录已回到自动分配, 下一个回合生效。');
+      setNotice(
+        (resolved ? `工作目录已保存: ${resolved}。` : '工作目录已回到自动分配。') +
+          (runningSessionId ? ' 该席位正在运行: 新目录会在本回合结束后生效, 点「立即重启会话」可马上切换。' : ' 下一个回合生效。'),
+      );
       onChanged();
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
@@ -204,7 +232,10 @@ export function Conversation({
     setNotice(null);
     try {
       await api.updateParticipant(detail.task.id, current.id, { sandbox: sandboxDraft });
-      setNotice(`权限已保存: ${SANDBOX_LABEL[sandboxDraft]}, 下一个回合生效。`);
+      setNotice(
+        `权限已保存: ${SANDBOX_LABEL[sandboxDraft]}。` +
+          (runningSessionId ? ' 该席位正在运行: 权限会在本回合结束后生效, 点「立即重启会话」可马上应用。' : ' 下一个回合生效。'),
+      );
       onChanged();
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
@@ -293,6 +324,11 @@ export function Conversation({
                 <button type="button" className="btn tiny" onClick={() => setPickingWs(true)}>
                   选择…
                 </button>
+                {runningSessionId ? (
+                  <button type="button" className="btn tiny" disabled={restarting} onClick={() => void restartSession()}>
+                    {restarting ? '重启中…' : '立即重启会话'}
+                  </button>
+                ) : null}
                 <button className="btn primary tiny" disabled={saving} onClick={() => void saveWorkspace()}>
                   {saving ? '保存中…' : '保存工作区'}
                 </button>
@@ -300,7 +336,9 @@ export function Conversation({
             </div>
           </div>
           <p className="small muted cs-hint">
-            只改这个席位的 cwd; 改动在下一个回合生效, 正在跑的会话不受影响。相对路径按任务工作区解析。
+            留空 = <code>{"<大工作区>/"}{current.role === 'strong' ? 'planner' : 'worker'}/{"<席位名>"}</code>;
+            也可以填相对任务工作区的路径(例如 <code>worker/experiments</code>)或绝对路径。改动对下一个回合生效;
+            席位正在跑时可以点「立即重启会话」马上切换。
           </p>
           {notice ? <div className="cs-notice">{notice}</div> : null}
         </div>
@@ -317,6 +355,11 @@ export function Conversation({
                 </option>
               ))}
             </select>
+            {runningSessionId ? (
+              <button type="button" className="btn tiny" disabled={restarting} onClick={() => void restartSession()}>
+                {restarting ? '重启中…' : '立即重启会话'}
+              </button>
+            ) : null}
             <button className="btn primary tiny" disabled={saving} onClick={() => void savePermission()}>
               {saving ? '保存中…' : '保存权限'}
             </button>
