@@ -248,13 +248,6 @@ export function App() {
               <span className="dot" />
               {state.conn === 'live' ? '事件流已连接' : state.conn === 'reconnecting' ? '重连中' : '连接中'}
             </span>
-            <span
-              className="mono"
-              style={{ fontSize: 10 }}
-              title="事件高水位: 这个任务目前已持久化的事件序号(只增不减), 断线重连时用它续传, 不是进度或消耗"
-            >
-              事件 #{detail?.highWaterSeq ?? 0}
-            </span>
           </div>
           {runtimeStatus?.exitOnUiClose ? (
             <p className="foot-note" title="关闭或刷新页面时浏览器会先确认; 确认关闭后后台进程会在约 2.5s 内结束, 刷新则不会。">
@@ -373,7 +366,7 @@ export function App() {
               ) : tab === 'artifacts' ? (
                 <ArtifactPanel detail={detail} />
               ) : (
-                <EventTimeline events={state.events} />
+                <EventTimeline events={state.events} highWaterSeq={detail?.highWaterSeq} />
               )}
             </div>
           </aside>

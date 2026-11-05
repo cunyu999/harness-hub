@@ -237,7 +237,7 @@ export function ArtifactPanel({ detail }: { detail: TaskDetail }) {
 
 const NOISY = new Set(['message.delta']);
 
-export function EventTimeline({ events }: { events: EventEnvelope[] }) {
+export function EventTimeline({ events, highWaterSeq }: { events: EventEnvelope[]; highWaterSeq?: number }) {
   const [hideNoisy, setHideNoisy] = useState(true);
   const [query, setQuery] = useState('');
   const list = events
@@ -261,7 +261,7 @@ export function EventTimeline({ events }: { events: EventEnvelope[] }) {
           隐藏增量
         </label>
       </div>
-      <div className="small muted">共 {events.length} 条事件, 显示最近 {list.length} 条。seq 单调递增, 可在刷新后用游标续传。</div>
+      <div className="small muted">        本页缓存 {events.length} 条事件{typeof highWaterSeq === 'number' ? ' · 事件高水位 #' + highWaterSeq : ''}, 显示最近 {list.length} 条。seq 单调递增(只增不减), 断线重连时用它续传, 和完成进度无关。      </div>
       <div className="tl">
         {list.map((e) => (
           <div className="tl-row" key={e.eventId}>
