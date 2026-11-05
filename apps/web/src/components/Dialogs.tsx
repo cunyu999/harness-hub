@@ -322,14 +322,12 @@ export function ProfilesPanel({
       requestedModel: '',
       requestedReasoning: '',
       concurrencyGroup: 'default',
-    workspaceRoot: '',
-    sandbox: 'workspace-write',
       envText: '',
       notes: '',
       liveEnabled: false,
       enabled: true,
     });
-    setNotice({ tone: 'muted', text: '填好名称与可执行入口后保存; 适配器一旦创建就不能改(避免会话漂移)。' });
+    setNotice({ tone: 'muted', text: '这个配置归属当前分组对应的适配器; 填好名称与可执行入口后保存。' });
   };
 
   const save = async () => {
@@ -348,8 +346,6 @@ export function ProfilesPanel({
         requestedModel: draft.requestedModel.trim() || null,
         requestedReasoning: draft.requestedReasoning.trim() || null,
         concurrencyGroup: draft.concurrencyGroup.trim() || 'default',
-        workspaceRoot: draft.workspaceRoot.trim() || null,
-        sandbox: draft.sandbox,
         env: parseEnv(draft.envText),
         notes: draft.notes.trim() || null,
         liveEnabled: draft.liveEnabled,
@@ -385,8 +381,6 @@ export function ProfilesPanel({
         requestedModel: draft.requestedModel.trim() || null,
         requestedReasoning: draft.requestedReasoning.trim() || null,
         concurrencyGroup: draft.concurrencyGroup.trim() || 'default',
-        workspaceRoot: draft.workspaceRoot.trim() || null,
-        sandbox: draft.sandbox,
         env: parseEnv(draft.envText),
         notes: draft.notes.trim() || null,
         enabled: true,
@@ -479,8 +473,13 @@ export function ProfilesPanel({
               <div key={g.id} className="pf-group">
                 <div className="pf-group-head">
                   <span className="mono">{g.label}</span>
-                  <button className="btn ghost sm" title={`新建 ${g.label} 配置`} onClick={() => startNew(g.id)}>
-                    +
+                  <button
+                    className="btn ghost pf-add"
+                    title={`新建一份 ${g.label} 配置`}
+                    aria-label={`新建 ${g.label} 配置`}
+                    onClick={() => startNew(g.id)}
+                  >
+                    <span aria-hidden="true">+</span>
                   </button>
                 </div>
                 {g.items.length === 0 ? <div className="pf-empty">还没有配置</div> : null}
@@ -519,18 +518,11 @@ export function ProfilesPanel({
                     />
                   </div>
                   <div className="field">
-                    <label>适配器{draft.id ? '(创建后不可改)' : ''}</label>
-                    <select
-                      value={draft.adapterId}
-                      disabled={!!draft.id}
-                      onChange={(e) => setDraft({ ...draft, adapterId: e.target.value })}
-                    >
-                      {(adapters.length > 0 ? adapters.map((a) => a.id) : [draft.adapterId]).map((id) => (
-                        <option key={id} value={id}>
-                          {adapters.find((a) => a.id === id)?.displayName ?? id}
-                        </option>
-                      ))}
-                    </select>
+                    <label>适配器</label>
+                    <div className="pf-adapter-fixed">
+                      {adapters.find((a) => a.id === draft.adapterId)?.displayName ?? draft.adapterId}
+                      <span className="small muted"> · 由所在分组决定, 不可修改</span>
+                    </div>
                   </div>
                   <div className="field pf-span">
                     <label>可执行入口(项目内绝对路径; mock 可留空)</label>
@@ -573,30 +565,6 @@ export function ProfilesPanel({
                       placeholder="low / medium / high"
                     />
                     <div className="field-hint">{reasoningHint(draft.adapterId)}</div>
-                  </div>
-                  <div className="field pf-span">
-                    <label>工作目录(留空 = 任务自己的工作区)</label>
-                    <input
-                      type="text"
-                      value={draft.workspaceRoot}
-                      onChange={(e) => setDraft({ ...draft, workspaceRoot: e.target.value })}
-                      placeholder="例如 D:\projects\my-app 或 .local\scratch\demo"
-                    />
-                    <div className="field-hint">
-                      这里填的目录会成为该 harness 的 cwd 与写入根; 留空则每个任务用独立的 .local/runs/&lt;taskId&gt;/workspace。
-                    </div>
-                  </div>
-                  <div className="field">
-                    <label>会话权限</label>
-                    <select
-                      value={draft.sandbox}
-                      onChange={(e) => setDraft({ ...draft, sandbox: e.target.value as Draft['sandbox'] })}
-                    >
-                      <option value="read-only">只读(不允许改文件)</option>
-                      <option value="workspace-write">工作区内可写(推荐)</option>
-                      <option value="danger-full-access">完全权限(不限制路径)</option>
-                    </select>
-                    <div className="field-hint">按 harness 原生能力生效: Codex 用沙箱, Claude 用 permissionMode, DSH 只能靠提示词与事后审计。</div>
                   </div>
                   <div className="field">
                     <label>并发组(同组内串行)</label>
@@ -707,8 +675,6 @@ interface Draft {
   requestedModel: string;
   requestedReasoning: string;
   concurrencyGroup: string;
-  workspaceRoot: string;
-  sandbox: 'read-only' | 'workspace-write' | 'danger-full-access';
   envText: string;
   notes: string;
   liveEnabled: boolean;
@@ -725,8 +691,6 @@ function toDraft(p: ProfileDto): Draft {
     requestedModel: p.requestedModel ?? '',
     requestedReasoning: p.requestedReasoning ?? '',
     concurrencyGroup: p.concurrencyGroup,
-    workspaceRoot: p.workspaceRoot ?? '',
-    sandbox: (p.sandbox ?? 'workspace-write') as Draft['sandbox'],
     envText: Object.entries(p.env ?? {})
       .map(([k, v]) => `${k}=${v}`)
       .join('\n'),
