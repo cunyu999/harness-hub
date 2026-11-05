@@ -33,13 +33,20 @@ export function App() {
 
   const { tasks, reload: reloadTasks } = useTaskList();
 
-  /** 再次点击同一个节点/卡片就收起, 免得只能靠右上角关闭。 */
+  /**
+   * 点画布上的席位 = 直接和它对话(像点开一个普通 harness);
+   * 点计划/交付卡 = 看详情。席位详情从对话栏的「详情」按钮进。
+   */
   const pickSelection = (next: GraphSelection) => {
-    if (next && next.kind === 'participant') setChatTarget(next.id);
+    if (next && next.kind === 'participant') {
+      setChatTarget(next.id);
+      setSelection(null);
+      setTab('chat');
+      return;
+    }
     setSelection((prev) => {
       if (!prev || !next) return next;
       if (prev.kind !== next.kind) return next;
-      if (prev.kind === 'participant' && next.kind === 'participant') return prev.id === next.id ? null : next;
       return null;
     });
   };
@@ -59,6 +66,7 @@ export function App() {
         files += res.files;
         if (taskId === t.id) {
           setTaskId(null);
+      localStorage.removeItem('hh.taskId');
           setSelection(null);
     setChatTarget(null);
           localStorage.removeItem('hh.taskId');
@@ -324,6 +332,7 @@ export function App() {
                 onChat={(participantId) => {
                   setChatTarget(participantId);
                   setTab('chat');
+                  setSelection(null);
                 }}
               />
             </aside>
@@ -344,12 +353,13 @@ export function App() {
                 <div className="empty">尚未选择任务。</div>
               ) : tab === 'chat' ? (
                 <Conversation
-            detail={detail}
-            deltas={state.deltas}
-            onChanged={refresh}
-            target={chatTarget}
-            onTargetChange={setChatTarget}
-          />
+                  detail={detail}
+                  deltas={state.deltas}
+                  onChanged={refresh}
+                  target={chatTarget}
+                  onTargetChange={setChatTarget}
+                  onOpenDetail={(participantId) => setSelection({ kind: 'participant', id: participantId })}
+                />
               ) : tab === 'plan' ? (
                 <PlanPanel detail={detail} onChanged={refresh} />
               ) : tab === 'approvals' ? (

@@ -510,6 +510,7 @@ export class ApiServer {
       workerProfileIds: input.workerProfileIds,
       limits: input.limits,
       workspace: input.workspace ?? null,
+      seats: input.seats ?? [],
     });
     const out = { task, snapshot: this.engine.snapshot(task.id) };
     if (key) this.repo.putIdempotent('create-task', key, out);

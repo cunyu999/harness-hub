@@ -3,6 +3,8 @@ import type { ProfileDto } from '../api';
 import { api } from '../api';
 import { stamp } from '../lib/format';
 
+type SandboxMode = 'read-only' | 'workspace-write' | 'danger-full-access';
+
 export function NewTaskDialog({
   profiles,
   onClose,
@@ -28,6 +30,8 @@ export function NewTaskDialog({
   const [strong, setStrong] = useState<string[]>([]);
   const [lead, setLead] = useState<string>('');
   const [workers, setWorkers] = useState<string[]>([]);
+  // 逐席位覆盖: 留空 = 按角色默认(planner 完全权限 / worker 工作区内可写)
+  const [seatDraft, setSeatDraft] = useState<Record<string, { ws: string; sandbox: '' | SandboxMode }>>({});
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -40,6 +44,23 @@ export function NewTaskDialog({
   }, [strong, lead]);
 
   const toggle = (list: string[], id: string): string[] => (list.includes(id) ? list.filter((x) => x !== id) : list.concat(id));
+
+  const slug = (name: string): string =>
+    name
+      .toLowerCase()
+      .replace(/[^a-z0-9\u4e00-\u9fa5]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 32) || 'seat';
+
+  const seatList = useMemo(() => {
+    const ids = [...strong, ...workers.filter((w) => !strong.includes(w))];
+    return ids.map((id) => ({
+      id,
+      profile: profiles.find((p) => p.id === id),
+      role: (strong.includes(id) ? 'strong' : 'worker') as 'strong' | 'worker',
+      isLead: id === lead,
+    }));
+  }, [strong, workers, lead, profiles]);
 
   const canSubmit = title.trim().length > 0 && objective.trim().length > 0 && strong.length >= 1 && strong.includes(lead);
 
@@ -61,6 +82,19 @@ export function NewTaskDialog({
         strongProfileIds: strong,
         leadProfileId: lead,
         workerProfileIds: workers,
+        seats: seatList
+          .map((seat) => {
+            const draft = seatDraft[seat.id];
+            const ws = draft?.ws.trim() ?? '';
+            const sandbox = draft?.sandbox ?? '';
+            if (!ws && !sandbox) return null;
+            return {
+              profileId: seat.id,
+              ...(ws ? { workspaceRoot: ws } : {}),
+              ...(sandbox ? { sandbox } : {}),
+            };
+          })
+          .filter((x): x is { profileId: string; workspaceRoot?: string; sandbox?: SandboxMode } => x !== null),
         idempotencyKey: `create-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       });
       onCreated(res.task.id);
@@ -154,6 +188,44 @@ export function NewTaskDialog({
               </label>
             ))}
           </div>
+        </div>
+
+        <div className="field">
+          <label>每个 harness 的工作区与权限(可留空 = 用角色默认)</label>
+          <div className="field-hint">
+            默认: 强模型(planner)完全权限、执行者(worker)工作区内可写。每个席位会在自己的角色大工作区里
+            (planner/ 或 worker/)自动建一个属于自己的小工作区; 这里可以改成相对任务工作区的路径(例如
+            planner/claude-a)或绝对路径。建好任务后也能在对话栏里逐个席改。
+          </div>
+          {seatList.length === 0 ? <div className="small muted">先选择参与者。</div> : null}
+          {seatList.map((seat) => {
+            const draft = seatDraft[seat.id] ?? { ws: '', sandbox: '' as const };
+            return (
+              <div key={seat.id} className="seat-row">
+                <span className={`seat-tag ${seat.role}`}>
+                  {seat.role === 'strong' ? '强模型' : '执行者'}
+                  {seat.isLead ? ' · 主控' : ''}
+                </span>
+                <span className="seat-name">{seat.profile?.name ?? seat.id}</span>
+                <select
+                  value={draft.sandbox}
+                  onChange={(e) =>
+                    setSeatDraft((prev) => ({ ...prev, [seat.id]: { ...draft, sandbox: e.target.value as '' | SandboxMode } }))
+                  }
+                >
+                  <option value="">权限跟随角色默认</option>
+                  <option value="read-only">只读</option>
+                  <option value="workspace-write">工作区内可写</option>
+                  <option value="danger-full-access">完全权限</option>
+                </select>
+                <input
+                  value={draft.ws}
+                  placeholder={`例如 ${seat.role === 'strong' ? 'planner' : 'worker'}/${slug(seat.profile?.name ?? 'seat')}`}
+                  onChange={(e) => setSeatDraft((prev) => ({ ...prev, [seat.id]: { ...draft, ws: e.target.value } }))}
+                />
+              </div>
+            );
+          })}
         </div>
 
         {err ? <div className="err">{err}</div> : null}

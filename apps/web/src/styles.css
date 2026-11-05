@@ -2683,3 +2683,84 @@ a.link:hover {
     display: none;
   }
 }
+
+/* 对话栏顶部身份条: 像普通 harness 一样显示"这条会话是谁、在哪个目录、什么权限" */
+.conv-ident {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px 8px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+.conv-avatar {
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  display: grid;
+  place-items: center;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  background: var(--surface-2);
+  border: 1px solid var(--line-2);
+}
+.conv-ident-main {
+  min-width: 0;
+}
+.conv-ident-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.conv-ident-cwd {
+  margin-top: 2px;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  color: var(--text-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 新建任务: 逐个席位的工作区/权限行 */
+.seat-row {
+  display: grid;
+  grid-template-columns: 92px minmax(80px, 1fr) 150px minmax(140px, 1.2fr);
+  gap: 8px;
+  align-items: center;
+  padding: 6px 0;
+  border-top: 1px dashed var(--line);
+}
+.seat-row:first-of-type {
+  border-top: none;
+}
+.seat-tag {
+  font-size: 10.5px;
+  padding: 2px 6px;
+  border-radius: 6px;
+  text-align: center;
+  white-space: nowrap;
+  border: 1px solid var(--line-2);
+  color: var(--text-2);
+  background: var(--surface-2);
+}
+.seat-tag.strong {
+  color: var(--accent);
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+}
+.seat-name {
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@media (max-width: 980px) {
+  .seat-row {
+    grid-template-columns: 1fr 1fr;
+  }
+}

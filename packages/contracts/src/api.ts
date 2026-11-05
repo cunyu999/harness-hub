@@ -124,6 +124,17 @@ export const CreateTaskSchema = z.object({
     .default({}),
   /** 任务工作区(绝对路径或相对项目根); 留空用任务私有目录。 */
   workspace: z.string().max(400).nullable().optional(),
+  /** 逐个席位的工作区/权限覆盖; 不填按角色默认(planner 完全权限, worker 工作区内可写)。 */
+  seats: z
+    .array(
+      z.object({
+        profileId: z.string().min(1).max(80),
+        workspaceRoot: z.string().max(600).nullable().optional(),
+        sandbox: z.enum(['read-only', 'workspace-write', 'danger-full-access']).nullable().optional(),
+      }),
+    )
+    .max(24)
+    .default([]),
   idempotencyKey: z.string().min(1).max(200).optional(),
 });
 export type CreateTaskInput = z.infer<typeof CreateTaskSchema>;

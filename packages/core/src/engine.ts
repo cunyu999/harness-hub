@@ -457,6 +457,8 @@ export class Engine implements AdapterHost {
     plannerSandbox?: SandboxMode | null;
     /** 执行者(worker)席位的默认权限; 留空用 workspace-write。 */
     workerSandbox?: SandboxMode | null;
+    /** 逐个席位的工作区/权限覆盖; 不填按角色默认。 */
+    seats?: Array<{ profileId: string; workspaceRoot?: string | null; sandbox?: SandboxMode | null }>;
   }): TaskRecord {
     const strongIds = unique(input.strongProfileIds);
     if (strongIds.length === 0) throw new EngineError('invalid_participants', '至少需要一个强模型配置');
@@ -510,6 +512,7 @@ export class Engine implements AdapterHost {
           capabilitySnapshot: profile.capabilitySnapshot,
           createdAt: now,
         });
+        const override = (input.seats ?? []).find((x) => x.profileId === profileId);
         const participant: Participant = {
           id: newId('part'),
           taskId,
@@ -521,10 +524,11 @@ export class Engine implements AdapterHost {
           displayName: profile.name,
           // planner(强模型)默认完全权限, worker(执行者)默认只能改工作区; 都可在任务里再改
           sandbox:
-            role === 'strong'
+            override?.sandbox ??
+            (role === 'strong'
               ? (input.plannerSandbox ?? 'danger-full-access')
-              : (input.workerSandbox ?? 'workspace-write'),
-          workspaceRoot: null,
+              : (input.workerSandbox ?? 'workspace-write')),
+          workspaceRoot: override?.workspaceRoot ?? null,
           createdAt: now,
         };
         this.repo.insertParticipant(participant);

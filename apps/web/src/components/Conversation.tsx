@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { TaskDetail } from '../api';
 import { api } from '../api';
 import type { StreamDelta } from '../store';
-import { clock, shortId } from '../lib/format';
+import { clock, initials, shortId } from '../lib/format';
 
 type SandboxMode = 'read-only' | 'workspace-write' | 'danger-full-access';
 
@@ -47,12 +47,15 @@ export function Conversation({
   onChanged,
   target,
   onTargetChange,
+  onOpenDetail,
 }: {
   detail: TaskDetail;
   deltas: StreamDelta[];
   onChanged: () => void;
   target: string | null;
   onTargetChange: (participantId: string | null) => void;
+  /** 打开这个席位的详情(工作项/尝试/产物)。 */
+  onOpenDetail?: (participantId: string) => void;
 }) {
   const [text, setText] = useState('');
   const [intent, setIntent] = useState<'chat' | 'instruction' | 'answer' | 'supplement'>('chat');
@@ -145,6 +148,40 @@ export function Conversation({
 
   return (
     <div className="conv">
+      {current ? (
+        <div className="conv-ident">
+          <span className="conv-avatar">{initials(current.displayName)}</span>
+          <div className="conv-ident-main">
+            <div className="conv-ident-name">
+              {current.displayName}
+              <span className={`chip ${isLeadTarget ? 'accent' : 'muted'}`}>
+                {isLeadTarget ? '主控' : current.role === 'strong' ? '强模型' : '执行者'}
+              </span>
+              <span
+                className={`chip ${
+                  current.sandbox === 'read-only'
+                    ? 'amber'
+                    : current.sandbox === 'danger-full-access'
+                      ? 'red'
+                      : 'green'
+                }`}
+              >
+                {SANDBOX_LABEL[(current.sandbox as SandboxMode) ?? 'workspace-write']}
+              </span>
+            </div>
+            <div className="conv-ident-cwd" title={current.workspaceRoot ?? ''}>
+              {current.workspaceRoot
+                ? toRelative(current.workspaceRoot)
+                : '工作区: 自动分配(角色大工作区 + 席位小工作区)'}
+            </div>
+          </div>
+          {onOpenDetail ? (
+            <button className="btn tiny" onClick={() => onOpenDetail(current.id)} title="工作项、尝试、产物与最近事件">
+              详情
+            </button>
+          ) : null}
+        </div>
+      ) : null}
       <div className="conv-target">
         <label className="small muted" htmlFor="conv-target-select">
           对话对象
@@ -290,12 +327,16 @@ export function Conversation({
             intent === 'supplement' && ['completed', 'blocked', 'failed'].includes(detail.task.lifecycle)
               ? '写清楚要改哪里(例如: 第二节太笼统, 换成带步骤的版本), 然后发送 → 会重新出计划让你批准'
               : isLeadTarget
-                ? '输入消息… (Ctrl+Enter 发送, 发给主控)'
-                : `输入消息… (Ctrl+Enter 发送, 只发给 ${current?.displayName ?? '该席位'})`
+                ? '输入消息… (Enter 发送, Shift+Enter 换行, 发给主控)'
+                : `输入消息… (Enter 发送, Shift+Enter 换行, 只发给 ${current?.displayName ?? '该席位'})`
           }
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) void send();
+            // 像普通 harness 的对话: Enter 直接发送, Shift+Enter 换行
+            if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
+              e.preventDefault();
+              if (!busy && text.trim().length > 0) void send();
+            }
           }}
         />
         <div className="row" style={{ justifyContent: 'flex-end' }}>
