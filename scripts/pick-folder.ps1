@@ -16,6 +16,20 @@ using System.Runtime.InteropServices;
 
 namespace ShellPick
 {
+    public static class Dpi
+    {
+        [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
+
+        // Windows 10 1703+ 的 per-monitor v2, 多显示器/缩放下比 SetProcessDPIAware 更清晰
+        [DllImport("user32.dll")] public static extern bool SetProcessDpiAwarenessContext(IntPtr value);
+
+        public static void Enable()
+        {
+            try { if (SetProcessDpiAwarenessContext(new IntPtr(-4))) return; } catch { }
+            try { SetProcessDPIAware(); } catch { }
+        }
+    }
+
     [ComImport, Guid("DC1C5A9C-E88A-4dde-A5A1-60F82A20AEF7")]
     internal class FileOpenDialogRCW { }
 
@@ -112,6 +126,9 @@ namespace ShellPick
 '@
 
 Add-Type -TypeDefinition $code -Language CSharp | Out-Null
+
+# 高 DPI 屏上必须先声明 DPI 感知, 否则这个原生对话框会被位图放大, 看起来发虚
+[ShellPick.Dpi]::Enable()
 
 $picked = [ShellPick.Picker]::Show($Title, $Initial)
 if ($picked) {
