@@ -166,6 +166,8 @@ function pickEnv(source: Record<string, string>, name: string): string | null {
  * - 丢掉非法键(空名、含 `=` 或 NUL)与含 NUL 的值, 否则整个环境块会被截断;
  * - 关键变量必须非空, 缺了就从当前进程补回来。
  */
+const SANITIZED_ENV = ['PYTHONPATH', 'PYTHONHOME', 'PYTHONSTARTUP', 'PYTHONEXECUTABLE'];
+
 export function buildChildEnv(extra: Record<string, string> = {}): Record<string, string> {
   const merged = new Map<string, { key: string; value: string }>();
   const put = (key: string, value: string) => {
@@ -177,12 +179,26 @@ export function buildChildEnv(extra: Record<string, string> = {}): Record<string
   for (const [k, v] of Object.entries(process.env)) {
     if (typeof v === 'string') put(k, v);
   }
+  // 继承来的东西可能让 harness 内部的 python 起不来(0xC0000142), 除非执行配置显式覆盖, 一律丢掉
+  for (const name of SANITIZED_ENV) merged.delete(name.toLowerCase());
+
   for (const [k, v] of Object.entries(extra)) {
     if (typeof v === 'string') put(k, v);
   }
 
   const out: Record<string, string> = {};
   for (const { key, value } of merged.values()) out[key] = value;
+
+  // Windows 应用商店的 python3.exe 是 0 字节别名, 从子进程里调用会以 0xC0000142 失败并弹框;
+  // 把 WindowsApps 从 harness 子进程的 PATH 里去掉(本机真正的 python 在别处)。
+  if (out.PATH) {
+    const kept = out.PATH.split(';').filter((x) => x && !x.toLowerCase().includes('\\windowsapps'));
+    if (kept.length) out.PATH = kept.join(';');
+  }
+  if (out.Path) {
+    const kept = out.Path.split(';').filter((x) => x && !x.toLowerCase().includes('\\windowsapps'));
+    if (kept.length) out.Path = kept.join(';');
+  }
 
   for (const name of CRITICAL_ENV) {
     const current = pickEnv(out, name);

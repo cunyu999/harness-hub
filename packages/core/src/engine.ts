@@ -618,6 +618,7 @@ export class Engine implements AdapterHost {
       workspaceRoot: this.workspaceOf(task),
       sandbox,
       sessionCwd: participant ? this.participantWorkspace(task, participant) : undefined,
+      scriptsDir: path.join(this.cfg.paths.root, 'scripts'),
       outputDir: 'deliverables',
     };
   }

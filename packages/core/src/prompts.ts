@@ -17,6 +17,8 @@ export interface PromptEnv {
   sandbox?: 'read-only' | 'workspace-write' | 'danger-full-access';
   /** 本次会话自己的工作目录(席位小工作区); 为空表示就是 workspaceRoot。 */
   sessionCwd?: string;
+  /** 仓库 scripts/ 目录(用于生成 docx 等)。 */
+  scriptsDir?: string;
 }
 
 const PLAN_SCHEMA = `{
@@ -117,6 +119,14 @@ export const REVIEW_ONLY_RULE = `本项是只读复核: 不要重新编译、不
 如果你确实尝试执行命令但环境不允许(沙箱/权限拒绝, 常见 exit 127 或空输出), 把该检查记为 skipped 并在 summary 里写"未重新执行, 依据程序验证记录", 然后照常给出结论; 环境限制不是 needs_input 的理由。
 `;
 
+/** 生成 Word 的统一做法: 用仓库自带脚本, 不走 python / Word COM。 */
+function docxRule(env: PromptEnv): string {
+  if (!env.scriptsDir) return '';
+  return `5. 需要交付 Word(.docx) 时, 用仓库自带脚本生成(不要用 python 或 Word COM):
+   powershell -NoProfile -ExecutionPolicy Bypass -File "${env.scriptsDir}\\make-docx.ps1" -Title "报告标题" -BodyFile "正文.txt" -Out "deliverables/报告.docx"
+   正文文件是纯文本, 空行分段, 以 "# " 开头的行会变成加粗小标题; 生成的 docx 正文是宋体小四(12pt)。`;
+}
+
 /** 工作区 + 权限模式说明, 每个回合按实际工作区求值。 */
 function workspaceRules(env: PromptEnv): string {
   const base = env.workspaceRoot;
@@ -130,7 +140,8 @@ function workspaceRules(env: PromptEnv): string {
    本次会话权限: ${SANDBOX_TEXT[env.sandbox ?? 'workspace-write']}
 2. 只写你被指派工作项的 writeScope 与 expectedOutputs 路径, 不要修改其他并行工作项的产物。
 3. 不要执行网络上传、发布、删除用户原始数据等操作; 需要时在结果中说明。
-4. 完成后按结果契约输出 JSON, 不要用自然语言声称"已通过"而没有实际文件或命令证据。`;
+4. 完成后按结果契约输出 JSON, 不要用自然语言声称"已通过"而没有实际文件或命令证据。
+${docxRule(env)}`;
 }
 
 export function buildPlanPrompt(
