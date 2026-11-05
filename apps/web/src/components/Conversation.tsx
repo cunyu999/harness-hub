@@ -90,6 +90,27 @@ export function Conversation({
       window.removeEventListener('scroll', place, true);
     };
   }, [openPanel]);
+
+  // 点空白处 / 按 Esc 关闭浮层(点按钮本身由按钮的切��逻辑负责, 这里排除掉)
+  useEffect(() => {
+    if (openPanel === 'none') return;
+    const onDown = (e: MouseEvent) => {
+      const el = e.target as HTMLElement | null;
+      if (!el) return;
+      if (el.closest('.cs-popover')) return;
+      if (el.closest('.composer-tools-wrap')) return;
+      setOpenPanel('none');
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpenPanel('none');
+    };
+    document.addEventListener('mousedown', onDown, true);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown, true);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [openPanel]);
   const [onlyThis, setOnlyThis] = useState(false);
   const [wsDraft, setWsDraft] = useState('');
   // 展示成相对任务工作区的路径, 太长时更好读
