@@ -7,7 +7,7 @@
  */
 import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { mkdirSync, writeFileSync, readFileSync, existsSync, statSync, copyFileSync, rmSync } from 'node:fs';
+import { mkdirSync, writeFileSync, readFileSync, existsSync, statSync, copyFileSync, rmSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import {
   DEFAULT_LIMITS,
@@ -69,6 +69,16 @@ import {
 } from './util.js';
 
 const WINDOWS_DLL_INIT_FAILED = -1073741502;
+
+export interface ArchiveEntry {
+  taskId: string;
+  title: string | null;
+  objective: string | null;
+  archivedAt: string | null;
+  fileCount: number;
+  totalBytes: number;
+  hasManifest: boolean;
+}
 
 export class EngineError extends Error {
   constructor(
@@ -233,6 +243,92 @@ export class Engine implements AdapterHost {
     const result = this.repo.purgeTask(taskId);
     this.live.delete(taskId);
     return { archivedDir, files, removedEvents: result.events };
+  }
+
+  /**
+   * 列出 .local/archive 下的归档项目(每个任务一个目录)。
+   * 只读取 manifest.json 与目录统计, 不解析工作区里的任何内容。
+   */
+  listArchives(): ArchiveEntry[] {
+    const root = path.join(this.cfg.paths.root, '.local', 'archive');
+    if (!existsSync(root)) return [];
+    const out: ArchiveEntry[] = [];
+    for (const name of readdirSync(root)) {
+      const dir = path.join(root, name);
+      let isDir = false;
+      try {
+        isDir = statSync(dir).isDirectory();
+      } catch {
+        continue;
+      }
+      if (!isDir) continue;
+
+      let manifest: Record<string, unknown> | null = null;
+      const manifestPath = path.join(dir, 'manifest.json');
+      if (existsSync(manifestPath)) {
+        try {
+          manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as Record<string, unknown>;
+        } catch {
+          manifest = null;
+        }
+      }
+
+      let fileCount = 0;
+      let totalBytes = 0;
+      for (const rel of walkFiles(dir)) {
+        if (rel === 'manifest.json') continue;
+        try {
+          totalBytes += statSync(path.join(dir, rel)).size;
+          fileCount += 1;
+        } catch {
+          /* 单个文件读不到就跳过 */
+        }
+      }
+
+      out.push({
+        taskId: name,
+        title: typeof manifest?.title === 'string' ? manifest.title : null,
+        objective: typeof manifest?.objective === 'string' ? manifest.objective : null,
+        archivedAt: typeof manifest?.archivedAt === 'string' ? manifest.archivedAt : null,
+        fileCount,
+        totalBytes,
+        hasManifest: manifest !== null,
+      });
+    }
+    return out.sort((a, b) => (b.archivedAt ?? '').localeCompare(a.archivedAt ?? '') || a.taskId.localeCompare(b.taskId));
+  }
+
+  /**
+   * 彻底删除某个归档项目: 删掉 .local/archive/<taskId> 整个目录。
+   * 只接受形如 task_xxx 的目录名, 且必须落在归档根目录内, 防止路径穿越。
+   */
+  deleteArchive(taskId: string): { removedFiles: number; removedBytes: number } {
+    const name = String(taskId ?? '').trim();
+    if (!/^[A-Za-z0-9_-]{1,80}$/.test(name)) {
+      throw new EngineError('invalid_archive_id', `不是合法的归档标识: ${name}`, 400);
+    }
+    const root = path.join(this.cfg.paths.root, '.local', 'archive');
+    const dir = path.join(root, name);
+    if (!existsSync(dir) || !statSync(dir).isDirectory()) {
+      throw new EngineError('archive_not_found', `归档不存在: ${name}`, 404);
+    }
+    if (path.resolve(path.dirname(dir)) !== path.resolve(root)) {
+      throw new EngineError('archive_outside_root', '归档目录不在归档根目录内', 400);
+    }
+
+    let removedFiles = 0;
+    let removedBytes = 0;
+    for (const rel of walkFiles(dir)) {
+      try {
+        removedBytes += statSync(path.join(dir, rel)).size;
+        removedFiles += 1;
+      } catch {
+        /* 统计失败不影响删除 */
+      }
+    }
+    rmSync(dir, { recursive: true, force: true, maxRetries: 4, retryDelay: 120 });
+    if (existsSync(dir)) throw new EngineError('archive_delete_failed', `删不掉归档目录: ${dir}`, 500);
+    return { removedFiles, removedBytes };
   }
 
   async shutdown(timeoutMs = 10_000): Promise<void> {
@@ -2947,6 +3043,30 @@ const VALIDATION_NOISE = [
 function validationOutputNoise(output: string): boolean {
   const text = output.toLowerCase();
   return VALIDATION_NOISE.some((needle) => text.includes(needle.toLowerCase()));
+}
+
+/** 递归列出目录下的相对文件路径(不跟随符号链接, 最多 5000 个)。 */
+function walkFiles(root: string, prefix = '', acc: string[] = []): string[] {
+  if (acc.length > 5000) return acc;
+  let entries: string[] = [];
+  try {
+    entries = readdirSync(path.join(root, prefix));
+  } catch {
+    return acc;
+  }
+  for (const name of entries) {
+    const rel = prefix ? `${prefix}/${name}` : name;
+    const abs = path.join(root, rel);
+    let stat: ReturnType<typeof statSync>;
+    try {
+      stat = statSync(abs);
+    } catch {
+      continue;
+    }
+    if (stat.isDirectory()) walkFiles(root, rel, acc);
+    else if (stat.isFile()) acc.push(rel);
+  }
+  return acc;
 }
 
 function isProcessAlive(pid: number): boolean {  try {

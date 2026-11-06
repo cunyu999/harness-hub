@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { DirectoryPicker } from './DirectoryPicker';
-import type { ProfileDto } from '../api';
-import { api } from '../api';
-import { stamp } from '../lib/format';
+import { ApiError, api, type ArchiveEntryDto, type ProfileDto } from '../api';
+import { bytes, stamp } from '../lib/format';
 
 type SandboxMode = 'read-only' | 'workspace-write' | 'danger-full-access';
 
@@ -271,6 +270,92 @@ export function NewTaskDialog({
           }}
         />
       ) : null}
+    </div>
+  );
+}
+
+export function ArchivePanel({ onClose }: { onClose: () => void }) {
+  const [entries, setEntries] = useState<ArchiveEntryDto[] | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [removed, setRemoved] = useState<string | null>(null);
+
+  const load = async () => {
+    try {
+      const res = await api.listArchives();
+      setEntries(res.entries);
+      setError(null);
+    } catch (e) {
+      setEntries([]);
+      setError(e instanceof ApiError ? e.body.message : String(e));
+    }
+  };
+
+  useEffect(() => {
+    void load();
+  }, []);
+
+  const remove = async (entry: ArchiveEntryDto) => {
+    const ok = window.confirm(
+      `彻底删除归档「${entry.title ?? entry.taskId}」?\n\n会把这个归档目录连同里面的 ${entry.fileCount} 个文件一起删掉, 不做二次留存, 也不进回收站。\n此操作不可撤销。`,
+    );
+    if (!ok) return;
+    setBusy(entry.taskId);
+    setError(null);
+    try {
+      const res = await api.deleteArchive(entry.taskId);
+      setRemoved(`已删除 ${entry.taskId}, 清理 ${res.removedFiles} 个文件 / ${bytes(res.removedBytes)}`);
+      await load();
+    } catch (e) {
+      setError(e instanceof ApiError ? e.body.message : String(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal" style={{ width: 760 }} onClick={(e) => e.stopPropagation()}>
+        <div className="pf-head">
+          <div>
+            <h4>已归档项目</h4>
+            <p className="muted" style={{ margin: '4px 0 0', fontSize: 12 }}>
+              删除任务时保留下来的成果产物放在 <code>.local/archive/&lt;taskId&gt;/</code>。这里可以查看并彻底删除它们。
+            </p>
+          </div>
+          <button className="btn tiny" onClick={onClose}>
+            关闭
+          </button>
+        </div>
+
+        {removed ? <p className="pf-notice ok">{removed}</p> : null}
+        {error ? <p className="pf-notice bad">{error}</p> : null}
+
+        {entries === null ? (
+          <p className="muted">读取中…</p>
+        ) : entries.length === 0 ? (
+          <p className="muted">还没有归档。删除一个任务时, 已登记的产物会被归档到这里。</p>
+        ) : (
+          <ul className="arc-list">
+            {entries.map((entry) => (
+              <li key={entry.taskId} className="arc-item">
+                <div className="arc-main">
+                  <div className="arc-title">{entry.title ?? '(没有 manifest)'}</div>
+                  <div className="arc-meta">
+                    {entry.taskId} · {entry.fileCount} 个文件 · {bytes(entry.totalBytes)}
+                    {entry.archivedAt ? ` · 归档于 ${stamp(entry.archivedAt)}` : ''}
+                    {entry.hasManifest ? '' : ' · 缺少 manifest.json'}
+                  </div>
+                  {entry.objective ? <div className="arc-obj">{entry.objective.slice(0, 160)}</div> : null}
+                </div>
+                <button className="btn tiny danger" disabled={busy === entry.taskId} onClick={() => void remove(entry)}>
+                  {busy === entry.taskId ? '删除中…' : '彻底删除'}
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
     </div>
   );
 }

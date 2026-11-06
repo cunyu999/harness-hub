@@ -116,6 +116,8 @@ export class ApiServer {
     this.add('POST', '/api/tasks', (ctx) => this.createTask(ctx));
     this.add('GET', '/api/tasks/:id', (ctx) => this.getTask(ctx));
     this.add('DELETE', '/api/tasks/:id', (ctx) => this.purgeTask(ctx));
+    this.add('GET', '/api/archive', () => this.listArchives());
+    this.add('DELETE', '/api/archive/:taskId', (ctx) => this.deleteArchive(ctx));
     this.add('GET', '/api/tasks/:id/events', (ctx) => this.streamEvents(ctx));
     this.add('POST', '/api/tasks/:id/plan', (ctx) => this.requestPlan(ctx));
     this.add('POST', '/api/tasks/:id/plan-decisions', (ctx) => this.decidePlan(ctx));
@@ -530,6 +532,17 @@ export class ApiServer {
   private async purgeTask(ctx: Ctx) {
     const keepArtifacts = ctx.url.searchParams.get('keepArtifacts') !== '0';
     const result = await this.engine.purgeTask(ctx.params.id, { keepArtifacts });
+    return { ok: true, ...result };
+  }
+
+  /** 已归档项目列表(读取 .local/archive 下的目录与 manifest)。 */
+  private listArchives() {
+    return { entries: this.engine.listArchives() };
+  }
+
+  /** 彻底删除一个归档项目(连目录一起删)。 */
+  private deleteArchive(ctx: Ctx) {
+    const result = this.engine.deleteArchive(ctx.params.taskId);
     return { ok: true, ...result };
   }
 

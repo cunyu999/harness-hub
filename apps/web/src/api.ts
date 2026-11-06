@@ -41,6 +41,16 @@ export type TaskDetail = Omit<TaskSnapshot, 'profiles' | 'artifacts'> & {
   workspace: string;
 };
 
+export interface ArchiveEntryDto {
+  taskId: string;
+  title: string | null;
+  objective: string | null;
+  archivedAt: string | null;
+  fileCount: number;
+  totalBytes: number;
+  hasManifest: boolean;
+}
+
 export interface HealthInfo {
   ok: boolean;
   version: string;
@@ -73,6 +83,9 @@ export const api = {
       `/api/tasks/${id}?keepArtifacts=${keepArtifacts ? 1 : 0}`,
     ),
   getTask: (id: string) => request<TaskDetail>('GET', `/api/tasks/${id}`),
+  listArchives: () => request<{ entries: ArchiveEntryDto[] }>('GET', '/api/archive'),
+  deleteArchive: (taskId: string) =>
+    request<{ ok: boolean; removedFiles: number; removedBytes: number }>('DELETE', `/api/archive/${taskId}`),
   createTask: (input: Record<string, unknown>) => request<{ task: TaskRecord; snapshot: TaskSnapshot }>('POST', '/api/tasks', input),
   requestPlan: (id: string, reason: string, supplement?: string) =>
     request<{ status: string }>('POST', `/api/tasks/${id}/plan`, { reason, supplement }),

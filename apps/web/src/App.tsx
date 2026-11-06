@@ -6,7 +6,7 @@ import { NodeDetail } from './components/NodeDetail';
 import { PlanPanel } from './components/PlanPanel';
 import { ApprovalPanel, ArtifactPanel, EventTimeline, ReviewPanel } from './components/Panels';
 import { Conversation } from './components/Conversation';
-import { NewTaskDialog, ProfilesPanel } from './components/Dialogs';
+import { ArchivePanel, NewTaskDialog, ProfilesPanel } from './components/Dialogs';
 import { LIFECYCLE_LABEL, LIFECYCLE_TONE, PHASES, PHASE_LABEL, clock, shortId } from './lib/format';
 import { useTheme } from './lib/theme';
 import { usePageLifecycle } from './lib/runtime';
@@ -28,6 +28,7 @@ export function App() {
   const [chatTarget, setChatTarget] = useState<string | null>(null);
   const [showNew, setShowNew] = useState(false);
   const [showProfiles, setShowProfiles] = useState(false);
+  const [showArchive, setShowArchive] = useState(false);
   const [busy, setBusy] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
 
@@ -240,9 +241,14 @@ export function App() {
           <button className="btn primary" onClick={() => setShowNew(true)}>
             新建任务
           </button>
-          <button className="btn" onClick={() => setShowProfiles(true)}>
-            执行配置 ({profiles.filter((p) => p.enabled).length})
-          </button>
+          <div className="row" style={{ gap: 6 }}>
+            <button className="btn" style={{ flex: 1 }} onClick={() => setShowProfiles(true)}>
+              执行配置 ({profiles.filter((p) => p.enabled).length})
+            </button>
+            <button className="btn" onClick={() => setShowArchive(true)} title="查看并彻底删除已归档的项目">
+              归档
+            </button>
+          </div>
           <div className="row" style={{ justifyContent: 'space-between' }}>
             <span className={`chip ${state.conn === 'live' ? 'green' : state.conn === 'reconnecting' ? 'amber' : 'muted'}`}>
               <span className="dot" />
@@ -390,6 +396,7 @@ export function App() {
       {showProfiles ? (
         <ProfilesPanel profiles={profiles} onClose={() => setShowProfiles(false)} onChanged={loadProfiles} />
       ) : null}
+        {showArchive ? <ArchivePanel onClose={() => setShowArchive(false)} /> : null}
 
       {toast ? <div className="toast">{toast}</div> : null}
       {detail?.task.lifecycle === 'blocked' ? (
