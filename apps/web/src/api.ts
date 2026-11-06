@@ -83,6 +83,8 @@ export const api = {
       `/api/tasks/${id}?keepArtifacts=${keepArtifacts ? 1 : 0}`,
     ),
   getTask: (id: string) => request<TaskDetail>('GET', `/api/tasks/${id}`),
+  openArtifact: (id: string, action: 'reveal' | 'open') =>
+    request<{ ok: boolean; action: string; path: string }>('POST', `/api/artifacts/${id}/open`, { action }),
   listArchives: () => request<{ entries: ArchiveEntryDto[] }>('GET', '/api/archive'),
   deleteArchive: (taskId: string) =>
     request<{ ok: boolean; removedFiles: number; removedBytes: number }>('DELETE', `/api/archive/${taskId}`),

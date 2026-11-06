@@ -8,6 +8,7 @@
  * - 写请求支持 idempotencyKey, 重复提交返回首次结果。
  */
 import { createReadStream, existsSync, mkdirSync, statSync, writeFileSync } from 'node:fs';
+import { spawn } from 'node:child_process';
 import http from 'node:http';
 import path from 'node:path';
 import { z } from 'zod';
@@ -116,6 +117,7 @@ export class ApiServer {
     this.add('POST', '/api/tasks', (ctx) => this.createTask(ctx));
     this.add('GET', '/api/tasks/:id', (ctx) => this.getTask(ctx));
     this.add('DELETE', '/api/tasks/:id', (ctx) => this.purgeTask(ctx));
+    this.add('POST', '/api/artifacts/:id/open', (ctx) => this.openArtifact(ctx));
     this.add('GET', '/api/archive', () => this.listArchives());
     this.add('DELETE', '/api/archive/:taskId', (ctx) => this.deleteArchive(ctx));
     this.add('GET', '/api/tasks/:id/events', (ctx) => this.streamEvents(ctx));
@@ -533,6 +535,35 @@ export class ApiServer {
     const keepArtifacts = ctx.url.searchParams.get('keepArtifacts') !== '0';
     const result = await this.engine.purgeTask(ctx.params.id, { keepArtifacts });
     return { ok: true, ...result };
+  }
+
+  /**
+   * 让操作系统的文件管理器/默认应用接管一个已登记产物。
+   * action=reveal → 在资源管理器中选中该文件; action=open → 用默认应用打开。
+   */
+  private openArtifact(ctx: Ctx) {
+    const action = String((ctx.body as { action?: string } | null)?.action ?? 'open');
+    if (action !== 'reveal' && action !== 'open') {
+      throw new EngineError('invalid_action', 'action 只能是 reveal 或 open', 422);
+    }
+    const artifact = this.repo.getArtifact(ctx.params.id);
+    if (!artifact) throw new EngineError('artifact_not_found', `产物不存在: ${ctx.params.id}`, 404);
+
+    const workspace = this.engine.workspaceOf(this.repo.getTask(artifact.taskId) ?? { id: artifact.taskId, workspaceRoot: null });
+    const abs = path.join(workspace, artifact.relativePath);
+    if (!isInside(workspace, abs)) throw new EngineError('artifact_outside_workspace', '产物路径越界', 409);
+    if (!existsSync(abs)) throw new EngineError('artifact_missing', '文件已不存在(可能被移动或删除)', 409);
+
+    const win = process.platform === 'win32';
+    if (action === 'reveal') {
+      if (win) spawn('explorer.exe', [`/select,${abs}`], { detached: true, stdio: 'ignore', windowsHide: true }).unref();
+      else spawn('xdg-open', [path.dirname(abs)], { detached: true, stdio: 'ignore' }).unref();
+    } else if (win) {
+      spawn('cmd.exe', ['/d', '/s', '/c', `start "" "${abs}"`], { detached: true, stdio: 'ignore', windowsHide: true }).unref();
+    } else {
+      spawn('xdg-open', [abs], { detached: true, stdio: 'ignore' }).unref();
+    }
+    return { ok: true, action, path: abs };
   }
 
   /** 已归档项目列表(读取 .local/archive 下的目录与 manifest)。 */

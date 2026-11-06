@@ -146,14 +146,44 @@ export function ReviewPanel({ detail }: { detail: TaskDetail }) {
 
 /* -------------------------------- 产物 -------------------------------- */
 
+/** 产物的短类型名, 避免把完整的 mime 串塞进一行小标签。 */
+function shortType(mediaType: string): string {
+  if (/wordprocessingml/.test(mediaType)) return 'word';
+  if (/spreadsheetml/.test(mediaType)) return 'excel';
+  if (/presentationml/.test(mediaType)) return 'slides';
+  if (mediaType === 'application/pdf') return 'pdf';
+  if (mediaType === 'application/octet-stream') return 'binary';
+  const sub = mediaType.split('/')[1] ?? mediaType;
+  return sub.replace(/^x-/, '').replace(/^vnd\./, '').slice(0, 14);
+}
+
+/** 只有文本类产物才在网页里直接预览, 二进制不下载、不渲染。 */
+function isTextPreview(mediaType: string): boolean {
+  if (mediaType.startsWith('text/')) return true;
+  if (/openxmlformats|officedocument|zip|pdf|octet-stream|^image\//i.test(mediaType)) return false;
+  if (mediaType === 'application/xml' || mediaType.endsWith('+xml')) return true;
+  return /(json|yaml|toml|javascript|csv)/i.test(mediaType);
+}
+
 export function ArtifactPanel({ detail }: { detail: TaskDetail }) {
   const [active, setActive] = useState<string | null>(null);
   const [content, setContent] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  const openWith = async (id: string, action: 'reveal' | 'open') => {
+    setNotice(null);
+    try {
+      await api.openArtifact(id, action);
+      setNotice(action === 'reveal' ? '已在文件管理器中选中该文件' : '已交给系统默认应用打开');
+    } catch (e) {
+      setNotice(e instanceof Error ? e.message : String(e));
+    }
+  };
   const art = detail.artifacts.find((a) => a.id === active) ?? null;
 
   useEffect(() => {
-    if (!art || art.mediaType.startsWith('image/') || art.mediaType === 'application/pdf') {
+    if (!art || art.mediaType.startsWith('image/') || art.mediaType === 'application/pdf' || !isTextPreview(art.mediaType)) {
       setContent(null);
       return;
     }
@@ -188,7 +218,7 @@ export function ArtifactPanel({ detail }: { detail: TaskDetail }) {
             if (e.key === 'Enter') setActive(active === a.id ? null : a.id);
           }}
         >
-          <span className={`chip ${a.status === 'registered' ? 'green' : 'muted'}`}>{a.mediaType.split('/')[1] ?? a.mediaType}</span>
+          <span className={`chip ${a.status === 'registered' ? 'green' : 'muted'}`}>{shortType(a.mediaType)}</span>
           <span className="small" style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {a.relativePath}
           </span>
@@ -211,6 +241,8 @@ export function ArtifactPanel({ detail }: { detail: TaskDetail }) {
               <img src={art.contentUrl} alt={art.relativePath} />
             ) : art.mediaType === 'application/pdf' ? (
               <iframe src={art.contentUrl} title={art.relativePath} />
+            ) : !isTextPreview(art.mediaType) ? (
+              <div className="empty">这类文件不在网页里预览, 点下面「用默认应用打开」查看。</div>
             ) : content !== null ? (
               <pre>{content}</pre>
             ) : err ? (
@@ -219,7 +251,13 @@ export function ArtifactPanel({ detail }: { detail: TaskDetail }) {
               <div className="empty">加载中…</div>
             )}
           </div>
-          <div className="row">
+          <div className="row" style={{ flexWrap: 'wrap', gap: 6 }}>
+            <button className="btn sm" onClick={() => void openWith(art.id, 'reveal')}>
+              在文件夹中显示
+            </button>
+            <button className="btn sm" onClick={() => void openWith(art.id, 'open')}>
+              用默认应用打开
+            </button>
             <a className="btn sm" href={art.contentUrl} target="_blank" rel="noreferrer">
               在新标签打开
             </a>
@@ -227,6 +265,7 @@ export function ArtifactPanel({ detail }: { detail: TaskDetail }) {
               下载
             </a>
           </div>
+          {notice ? <div className="small muted" style={{ marginTop: 6 }}>{notice}</div> : null}
         </div>
       ) : null}
     </div>

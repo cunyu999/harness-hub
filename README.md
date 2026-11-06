@@ -246,6 +246,20 @@ GET    /api/archive              # 列出归档
 DELETE /api/archive/:taskId      # 彻底删除一个归档(只接受 task_xxx 这类目录名)
 ```
 
+### 产物操作
+
+「产物」页签里选中任一产物后, 除了在网页里预览(文本、图片、PDF), 还可以交给系统处理:
+
+- **在文件夹中显示** —— 打开资源管理器并选中该文件(`explorer.exe /select,<绝对路径>`);
+- **用默认应用打开** —— 交给 Windows 默认关联程序(`cmd /c start "" <绝对路径>`), 适合 docx/xlsx/exe 这类网页里不该渲染的文件。
+
+两个动作都只在**已登记且工作区内存在**的产物上生效, 越界、未登记、文件已删除分别返回 `409 artifact_outside_workspace` / `404 artifact_not_found` / `409 artifact_missing`。
+二进制文件(如 docx)不会在网页里被当文本渲染, 而是提示改用默认应用打开。
+
+```bash
+POST /api/artifacts/:id/open     # body: {"action":"reveal"|"open"}
+```
+
 ## 界面
 
 真实事件驱动: 画布上的每个状态、每条连线都来自服务端事件与会话快照, 不含模拟动画。
