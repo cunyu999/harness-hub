@@ -17,7 +17,8 @@
 
 ## 产物在资源管理器中定位 / 用默认应用打开
 
-- 产物页选中任一产物后有两个系统动作: 「打开所在文件夹」(`explorer.exe <目录>`, 直接打开父目录)与「用默认应用打开」(Windows 走 `rundll32 url.dll,FileProtocolHandler <绝对路径>`, 失败退回 `powershell Start-Process -FilePath`; 非 0 退出返回 500 open_failed 并带上 stderr)。
+- 与 Codex 一致: 产物页选中任一产物后, 「在文件夹中显示」会打开父目录**并选中高亮该文件**(`explorer.exe /select,<绝对路径>`, Node 会自动给含空格的参数补引号; explorer 恒返回 1, 不看退出码)。
+- 「用默认应用打开」走 Windows 的 ShellExecute 语义: 先 `rundll32 url.dll,FileProtocolHandler <绝对路径>`, 失败退回 `powershell Start-Process -FilePath`; 两种都非 0 时返回 500 open_failed 并带上 stderr, 不假装成功。
 - 接口 POST /api/artifacts/:id/open, body `{action:'reveal'|'open'}`; 只对已登记产物生效, 越界 409 artifact_outside_workspace、未登记 404 artifact_not_found、文件已消失 409 artifact_missing, action 非法 422 invalid_action。
 - 网页预览收紧为白名单: 只有 text/* 与 json/yaml/toml/csv/xml(+xml) 直接渲染; docx/xlsx/pptx 等(openxmlformats|officedocument)与二进制不再当文本显示, 改为提示用默认应用打开。产物列表的类型标签也从完整 mime 串改为 word/excel/slides/plain 这类短名。
 - 验证: 真机点过两个按钮(docx 产物), 资源管理器选中成功、Word 默认关联成功, 提示文案分别为「已在文件管理器中选中该文件」「已交给系统默认应用打开」; API 侧 200/422/404 均已覆盖。

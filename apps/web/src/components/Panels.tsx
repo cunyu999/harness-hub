@@ -175,7 +175,7 @@ export function ArtifactPanel({ detail }: { detail: TaskDetail }) {
     setNotice(null);
     try {
       await api.openArtifact(id, action);
-      setNotice(action === 'reveal' ? '已打开产物所在文件夹' : '已交给系统默认应用打开');
+      setNotice(action === 'reveal' ? '已在文件管理器中选中该产物' : '已交给系统默认应用打开');
     } catch (e) {
       setNotice(e instanceof Error ? e.message : String(e));
     }
@@ -253,7 +253,7 @@ export function ArtifactPanel({ detail }: { detail: TaskDetail }) {
           </div>
           <div className="row" style={{ flexWrap: 'wrap', gap: 6 }}>
             <button className="btn sm" onClick={() => void openWith(art.id, 'reveal')}>
-              打开所在文件夹
+              在文件夹中显示
             </button>
             <button className="btn sm" onClick={() => void openWith(art.id, 'open')}>
               用默认应用打开

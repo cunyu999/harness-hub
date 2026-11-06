@@ -539,7 +539,7 @@ export class ApiServer {
 
   /**
    * 让操作系统的文件管理器/默认应用接管一个已登记产物。
-   * action=reveal → 直接打开产物所在文件夹; action=open → 用默认关联程序打开该文件。
+   * action=reveal → 打开产物所在文件夹并选中该文件(与 Codex 一致, 文件高亮); action=open → 用默认关联程序打开该文件。
    * 打开动作会等命令返回(最多 4s), 失败时把真实 stderr 交给前端, 不再假装成功。
    */
   private openArtifact(ctx: Ctx) {
@@ -559,8 +559,9 @@ export class ApiServer {
     if (action === 'reveal') {
       const dir = path.dirname(abs);
       if (process.platform === 'win32') {
-        // explorer 打开目录后总是返回 1, 不能拿退出码判断成败; 只要目录存在即可
-        spawn('explorer.exe', [dir], { detached: true, stdio: 'ignore', windowsHide: true }).unref();
+        // /select,<path> 让资源管理器打开父目录并高亮该文件; 整个参数必须是单独一段
+        // (Node 会为含空格的参数补引号, explorer 才能正确解析)。explorer 恒返回 1, 不看退出码。
+        spawn('explorer.exe', ['/select,' + abs], { detached: true, stdio: 'ignore', windowsHide: true }).unref();
       } else {
         spawn('xdg-open', [dir], { detached: true, stdio: 'ignore' }).unref();
       }
