@@ -306,10 +306,23 @@ ws.close();
 edge.kill();
 
 /* -------------------------------- 清理 -------------------------------- */
+// 先按标题前缀扫掉历史残留(上一次运行被打断时会留下), 再删本次的两条, 最后复查。
+async function sweepLeftovers() {
+  const list = (await j('GET', '/api/tasks')).data ?? [];
+  for (const t of list) {
+    if (!/^验收(取消|工作区) /.test(t.title)) continue;
+    await j('DELETE', `/api/tasks/${t.id}`);
+    await j('DELETE', `/api/archive/${t.id}`);
+  }
+}
+await sweepLeftovers();
 for (const id of [planTask, runTask]) {
   await j('DELETE', `/api/tasks/${id}`);
   await j('DELETE', `/api/archive/${id}`);
 }
+const left = ((await j('GET', '/api/tasks')).data ?? []).filter((t) => /^验收(取消|工作区) /.test(t.title));
+if (left.length > 0) record('清理本次任务的临时数据', false, left.map((t) => t.id).join(','));
+else record('清理本次任务的临时数据', true);
 
 const failed = results.filter((r) => !r.ok);
 console.log(`\n界面验收: 通过 ${results.length - failed.length}/${results.length}`);
