@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import type { TaskDetail } from '../api';
 import type { PlanWorkItem } from '../../../../packages/contracts/src/types';
 import { ITEM_LABEL, ITEM_TONE, RISK_LABEL, bytes, shortType, stamp } from '../lib/format';
@@ -48,6 +49,14 @@ export function WorkItemDetail({
   item: PlanWorkItem;
   onClose: () => void;
 }) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
   const live = detail.workItems.find((w) => w.planItemId === item.id) ?? null;
   const participantId = item.assignedParticipantId ?? live?.assignedParticipantId ?? null;
   const participant = detail.participants.find((p) => p.id === participantId) ?? null;

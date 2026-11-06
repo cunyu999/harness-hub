@@ -16,7 +16,7 @@ git clone https://github.com/cunyu999/harness-hub.git
 cd harness-hub
 npm install
 npm run build                     # 编译后端 + 打包前端
-npm start                         # 或: node dist/apps/server/src/index.js
+npm start                         # 也可以用 node dist/apps/server/src/index.js(会自动套一层不弹框的启动器)
 ```
 
 浏览器打开 <http://127.0.0.1:4310>。
@@ -182,8 +182,11 @@ Codex 仅代码路径确认, 未做 live 验证。
   SSE 快照+增量+心跳+resync、mock 全链路端到端。
 - **已验证(真实进程)**: Codex / Claude Code / DSH 的 inspect 握手; Claude Code 与 DSH 的 live 真实回合
   (Claude Code completed, DSH `stopReason=end_turn`)。
-- **未验证**: 真实模型下完整任务闭环(课程报告、C++ 程序设计)、真实进程取消与重启恢复的实测、
-  Codex live 回合(本轮未授权调用)。
+- **已验证(真实任务闭环)**: 课程报告(Word, 宋体小四, ≤500 字)、C++ 程序设计、C++ Hello World
+  (Claude Code 主控 + DSH 执行)都跑到 `delivery/completed`, 产物经程序验证与人工查阅。
+- **未验证**: Codex live 回合(需要你先授权调用)、真实进程"取消"在长回合中途的实测。
+- **自动化验收**: `npm test` 64 项、`scripts/acceptance-api.mjs` 53 项、`scripts/acceptance-ui.mjs` 27 项,
+  见 `docs/acceptance-report.md` 与 `docs/acceptance-checklist.md`(需求 → 证据对照)。
 
 ## 设计要点
 
@@ -313,6 +316,20 @@ mock 的确定性数字都统一成 `{input, output, cached, total}`; 认不出�
 
 计划确认: 统一计划出来后必须由人选择「直接执行 / 补充内容 / 重新计划」, 批准绑定版本哈希。
 
+## 自动化验收
+
+```bash
+npm run build
+npm test                            # 64 项单元/集成
+npm start                           # 另开一个终端; 截图与验收期间可设 HH_EXIT_WITH_UI=0 常驻
+node scripts/acceptance-api.mjs     # 53 项接口契约(用 mock, 不花额度)
+node scripts/acceptance-ui.mjs      # 27 项界面断言(无头 Edge + CDP)
+node scripts/acceptance-live.mjs    # 真实 harness 闭环(会消耗额度, 需要你点头)
+```
+
+接口验收默认**不弹任何真实窗口**: 想看"在文件夹中显示/用默认应用打开"的真实行为, 加 `HH_ACCEPT_SHELL=1`。
+这样做是因为早期脚本会打开资源管理器、随后又删掉任务目录, Windows 会留下一个「位置不可用」的模态框。
+
 ## 目录
 
 ```
@@ -354,9 +371,20 @@ docs               进度、决策(ADR)、兼容性、验收矩阵、证据、ha
 - 不监控本程序之外启动的会话。
 - 不自动发布、不自动推送代码(仓库的发布动作由人工执行)。
 
-## 遇到「应用程序无法正常启动 (0xC0000142)」
+## 遇到「应用程序无法正常启动 (0xC0000142)」/「位置不可用」
 
-这是 Windows 加载器失败, 与本程序的执行配置无关。本程序已做环境清洗并对子进程启动失败自动重试一次; 若仍反复出现, 重启本程序(必要时重启机器)后再试, 详见 [docs/compatibility.md](docs/compatibility.md)。
+这两类弹窗都来自 Windows 自己, 不是本程序的界面, 现在都已从源头处理:
+
+- **0xC0000142**: 加载器失败(常见于 PATH 里的 python 商店别名 stub)。`scripts/start.ps1` 启动时调
+  `SetErrorMode(SEM_FAILCRITICALERRORS|SEM_NOGPFAULTERRORBOX|SEM_NOOPENFILEERRORBOX)`, 这个开关是进程级且被
+  **子进程继承**, 于是 node → harness → python/cmd 这条链上再失败只会拿到退出码, 不再弹框。
+  为避免"必须记住用哪个命令启动", 服务入口 `apps/server/src/index.ts` 在 `main()` 第一行检查
+  `HH_ERROR_MODE`; 没置位就用 `start.ps1` 重新拉起自己再转发退出码 —— 所以 `npm start`、IDE 直接运行、
+  `node dist/apps/server/src/index.js` 三种启动方式都安全(会看到外层 node + 内层 node 两个进程, 属正常)。
+- **「位置不可用 / Location is not available」**: 资源管理器窗口指向了已被删除的目录。原因通常是
+  "打开了某个产物所在文件夹之后, 那个任务被删除/归档清理"。现在没有自动清理会去删正在被浏览的目录;
+  验收脚本默认不弹真实窗口(`HH_ACCEPT_SHELL=1` 才弹), 且打开后会先关掉再清理。
+  若你看到残留窗口, 直接点 OK 关掉即可, 不影响数据。
 
 ## 已知限制
 

@@ -1,3 +1,23 @@
+## 2026-11-06 全量回归: 64 单元 / 53 接口 / 27 界面 / 9 真实
+
+按"把你说过的每条要求都验一遍"做了一轮完整回归, 脚本都在 `scripts/` 下可复跑:
+
+- `npm test` **64/64**。
+- `node scripts/acceptance-api.mjs` **53/53**(配置、主链路、返工、产物、归档、边界、暂停/恢复/取消)。
+- `node scripts/acceptance-ui.mjs` **27/27**(三决策按钮、7 段步进、圆点状态列、工作项详情、token、产物四按钮、席位工作区/权限、归档面板)。
+- `node scripts/acceptance-live.mjs` **9/9**(Claude Code 主控 + DSH 执行, 1.6 分钟 completed, 130681 tokens)。
+
+过程中修掉的两处真问题:
+
+1. 主控给出的验证命令 `findstr /x "带空格的内容" file` 会把空格当多模式 → `FINDSTR: Cannot open live`;
+   已在 `VALIDATION_SHELL_NOTE` 明确要求 `/x /c:"..."` 或改用 PowerShell 比较。
+2. 直接 `node dist/apps/server/src/index.js` 启动时没有 `SetErrorMode`, 子工具加载失败会弹
+   「应用程序无法正常启动 (0xC0000142)」; 现在入口检测 `HH_ERROR_MODE` 并自动用 `scripts/start.ps1` 重新拉起自己,
+   任何启动方式都走同一条"不弹框"的进程树。
+
+另外, 验收脚本默认**不再**打开真实资源管理器窗口(需要 `HH_ACCEPT_SHELL=1`), 避免"窗口指向已删除目录"导致
+Windows 弹「位置不可用」。
+
 ## 计划栏: 列宽、点状状态、工作项详情
 
 - 表格只留三列并固定宽度: 目标 auto(约 60%)、执行者 96px、状态 72px; 表头去掉 letter-spacing / uppercase, 中文不再被拆成「目 标」。

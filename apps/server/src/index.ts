@@ -1,7 +1,9 @@
 /**
  * 服务入口: 打开数据库、抢占单实例锁、装配适配器、恢复未完成状态、启动 HTTP。
  */
-import { mkdirSync } from 'node:fs';
+
+import { spawnSync } from 'node:child_process';
+import { existsSync, mkdirSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { ClaudeAdapter } from '../../../packages/adapters/src/claude.js';
@@ -90,6 +92,8 @@ function seedProfiles(repo: Repo, cfg: AppConfig): void {
 }
 
 async function main(): Promise<void> {
+  // 先把"不弹系统错误框"落实到整个进程树, 再往下做任何事
+  ensureWindowsErrorMode();
   const cfg = loadConfig();
   for (const dir of [cfg.dataDir, cfg.logsDir, cfg.homesDir, cfg.runsDir]) {
     mkdirSync(dir, { recursive: true });
@@ -207,6 +211,28 @@ async function main(): Promise<void> {
 
   process.on('SIGINT', () => void shutdown('SIGINT'));
   process.on('SIGTERM', () => void shutdown('SIGTERM'));
+}
+
+/**
+ * Windows 上必须先关掉"硬错误弹窗"(0xC0000142 那类), 否则 harness 调起的 python/cmd 一旦
+ * 加载失败, 会弹一个系统模态框挡在人前面。
+ *
+ * 这个开关是**进程级**的、会被子进程继承, 但 Node 调不到 SetErrorMode, 所以只能借 PowerShell:
+ * 若当前进程不是经由 scripts/start.ps1 启动(HH_ERROR_MODE 未置位), 就用 start.ps1 重新拉起自己,
+ * 然后原样转发退出码。这样无论是 `npm start`、IDE 直接跑, 还是 `node dist/apps/server/src/index.js`,
+ * 拿到的都是"不弹框"的进程树。
+ */
+function ensureWindowsErrorMode(): void {
+  if (process.platform !== 'win32') return;
+  if (process.env.HH_ERROR_MODE === '1') return;
+  const ps1 = path.join(process.cwd(), 'scripts', 'start.ps1');
+  if (!existsSync(ps1)) return;
+  const child = spawnSync(
+    'powershell',
+    ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ps1, ...process.argv.slice(2)],
+    { stdio: 'inherit', env: { ...process.env, HH_ERROR_MODE: '1' } },
+  );
+  process.exit(child.status ?? 0);
 }
 
 main().catch((err: Error) => {

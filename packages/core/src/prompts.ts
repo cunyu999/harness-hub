@@ -102,6 +102,11 @@ export const VALIDATION_SHELL_NOTE = `validationCommand 的执行环境:
 - 在任务 workspace 根目录执行, 由程序调用系统外壳: Windows 是 \`cmd.exe /d /s /c\`, 类 Unix 是 \`/bin/sh -c\`。
 - Windows 上没有 grep/sed/awk/cat; 要匹配文本用 findstr, 并且整串必须写成 /c:"Hello, World!" ——
   只写 findstr "Hello, World!" file 会被 cmd 拆成多个文件参数, 报 "Cannot open World!\"", 结果必然失败。
+- **带空格的精确整行匹配必须写成 \`findstr /x /c:"整行内容" 文件\`**。写 \`findstr /x "harness-hub live check 2026" check.txt\`
+  是错的: findstr 把引号里的空格当成多个模式, 于是去打开 live / check / 2026 三个文件, 输出
+  \`FINDSTR: Cannot open live\`, 退出码即使为 0 也会被程序判为失败。
+- 更稳妥的做法是让 PowerShell 比字符串(不依赖 findstr 的引号规则):
+  \`powershell -NoProfile -Command "if ((Get-Content -Raw check.txt).Trim() -eq 'harness-hub live check 2026') { exit 0 } else { exit 1 }"\`
 - Windows 上不要写 \`./hello.exe\`, 会被归一成 \`.\\hello.exe\`, 直接写 \`hello.exe\` 或 \`.\\hello.exe\`。
 - 命令必须不交互, 退出码 0 才算通过; 需要多条命令时用 \`&&\` 串联或写成脚本文件。
 - 只读复核类工作项不需要重新编译/执行, 用已登记产物与验证记录核对即可。`;

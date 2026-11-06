@@ -1426,6 +1426,8 @@ export class Engine implements AdapterHost {
       createdAt: nowIso(),
     };
     this.repo.db.tx(() => {
+      // 只取代尚未批准的旧草案: 已批准的版本保留 approved 痕迹(历史与审计需要),
+      // "当前生效的计划"由 task.approvedPlanRevisionId 决定, 新版本批准时再切换。
       const prev = this.repo.listPlans(task.id).filter((p) => p.status === 'proposed');
       for (const p of prev) this.repo.setPlanStatus(p.id, 'superseded');
       this.repo.insertPlan(revision);

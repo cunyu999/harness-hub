@@ -18,6 +18,9 @@ $SEM_NOGPFAULTERRORBOX = 0x0002
 $SEM_NOOPENFILEERRORBOX = 0x8000
 [Win32ErrorMode]::SetErrorMode($SEM_FAILCRITICALERRORS -bor $SEM_NOGPFAULTERRORBOX -bor $SEM_NOOPENFILEERRORBOX) | Out-Null
 
+# 告诉 node 入口"已经被包装过", 免得它又用本脚本重新拉起自己
+$env:HH_ERROR_MODE = '1'
+
 $root = Split-Path -Parent $PSScriptRoot
 $entry = Join-Path $root 'dist/apps/server/src/index.js'
 if (-not (Test-Path $entry)) {
