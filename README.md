@@ -250,8 +250,8 @@ DELETE /api/archive/:taskId      # 彻底删除一个归档(只接受 task_xxx �
 
 「产物」页签里选中任一产物后, 除了在网页里预览(文本、图片、PDF), 还可以交给系统处理:
 
-- **在文件夹中显示** —— 打开资源管理器并选中该文件(`explorer.exe /select,<绝对路径>`);
-- **用默认应用打开** —— 交给 Windows 默认关联程序(`cmd /c start "" <绝对路径>`), 适合 docx/xlsx/exe 这类网页里不该渲染的文件。
+- **打开所在文件夹** —— 直接打开产物所在目录(`explorer.exe <目录>`), 不选中、不弹别的窗口;
+- **用默认应用打开** —— 走 Windows ShellExecute(`rundll32 url.dll,FileProtocolHandler <绝对路径>`, 失败再退 `powershell Start-Process -FilePath`), 适合 docx/xlsx/exe 这类网页里不该渲染的文件; 命令非 0 退出会把真实 stderr 返回给前端(`500 open_failed`), 不再假装成功。
 
 两个动作都只在**已登记且工作区内存在**的产物上生效, 越界、未登记、文件已删除分别返回 `409 artifact_outside_workspace` / `404 artifact_not_found` / `409 artifact_missing`。
 二进制文件(如 docx)不会在网页里被当文本渲染, 而是提示改用默认应用打开。

@@ -8,7 +8,7 @@
  * - 写请求支持 idempotencyKey, 重复提交返回首次结果。
  */
 import { createReadStream, existsSync, mkdirSync, statSync, writeFileSync } from 'node:fs';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import http from 'node:http';
 import path from 'node:path';
 import { z } from 'zod';
@@ -539,7 +539,8 @@ export class ApiServer {
 
   /**
    * 让操作系统的文件管理器/默认应用接管一个已登记产物。
-   * action=reveal → 在资源管理器中选中该文件; action=open → 用默认应用打开。
+   * action=reveal → 直接打开产物所在文件夹; action=open → 用默认关联程序打开该文件。
+   * 打开动作会等命令返回(最多 4s), 失败时把真实 stderr 交给前端, 不再假装成功。
    */
   private openArtifact(ctx: Ctx) {
     const action = String((ctx.body as { action?: string } | null)?.action ?? 'open');
@@ -549,21 +550,47 @@ export class ApiServer {
     const artifact = this.repo.getArtifact(ctx.params.id);
     if (!artifact) throw new EngineError('artifact_not_found', `产物不存在: ${ctx.params.id}`, 404);
 
-    const workspace = this.engine.workspaceOf(this.repo.getTask(artifact.taskId) ?? { id: artifact.taskId, workspaceRoot: null });
+    const task = this.repo.getTask(artifact.taskId);
+    const workspace = this.engine.workspaceOf(task ?? { id: artifact.taskId, workspaceRoot: null });
     const abs = path.join(workspace, artifact.relativePath);
     if (!isInside(workspace, abs)) throw new EngineError('artifact_outside_workspace', '产物路径越界', 409);
     if (!existsSync(abs)) throw new EngineError('artifact_missing', '文件已不存在(可能被移动或删除)', 409);
 
-    const win = process.platform === 'win32';
     if (action === 'reveal') {
-      if (win) spawn('explorer.exe', [`/select,${abs}`], { detached: true, stdio: 'ignore', windowsHide: true }).unref();
-      else spawn('xdg-open', [path.dirname(abs)], { detached: true, stdio: 'ignore' }).unref();
-    } else if (win) {
-      spawn('cmd.exe', ['/d', '/s', '/c', `start "" "${abs}"`], { detached: true, stdio: 'ignore', windowsHide: true }).unref();
-    } else {
-      spawn('xdg-open', [abs], { detached: true, stdio: 'ignore' }).unref();
+      const dir = path.dirname(abs);
+      if (process.platform === 'win32') {
+        // explorer 打开目录后总是返回 1, 不能拿退出码判断成败; 只要目录存在即可
+        spawn('explorer.exe', [dir], { detached: true, stdio: 'ignore', windowsHide: true }).unref();
+      } else {
+        spawn('xdg-open', [dir], { detached: true, stdio: 'ignore' }).unref();
+      }
+      return { ok: true, action, path: abs, opened: dir };
     }
-    return { ok: true, action, path: abs };
+
+    if (process.platform !== 'win32') {
+      spawn('xdg-open', [abs], { detached: true, stdio: 'ignore' }).unref();
+      return { ok: true, action, path: abs };
+    }
+
+    // Windows: 用 ShellExecute 语义打开。rundll32 最省事且不依赖 cmd 的 start 语法;
+    // 失败再退回 PowerShell 的 Start-Process(-FilePath 在 5.1 上才有)。
+    const attempts: { label: string; cmd: string; args: string[] }[] = [
+      { label: 'rundll32', cmd: 'rundll32.exe', args: ['url.dll,FileProtocolHandler', abs] },
+      {
+        label: 'powershell',
+        cmd: 'powershell.exe',
+        args: ['-NoProfile', '-NonInteractive', '-Command', `Start-Process -FilePath '${abs.replace(/'/g, "''")}'`],
+      },
+    ];
+    const errors: string[] = [];
+    for (const attempt of attempts) {
+      const res = spawnSync(attempt.cmd, attempt.args, { timeout: 4000, windowsHide: true, encoding: 'utf8' });
+      if (!res.error && (res.status === 0 || res.status === null)) {
+        return { ok: true, action, path: abs, via: attempt.label };
+      }
+      errors.push(`${attempt.label}: ${res.error?.message ?? res.stderr?.trim() ?? `exit ${res.status}`}`);
+    }
+    throw new EngineError('open_failed', `无法用默认应用打开: ${errors.join(' | ')}`, 500);
   }
 
   /** 已归档项目列表(读取 .local/archive 下的目录与 manifest)。 */
