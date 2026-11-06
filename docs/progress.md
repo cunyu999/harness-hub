@@ -1,9 +1,16 @@
+## 产物在资源管理器中定位 / 用默认应用打开
+
+- 产物页选中任一产物后有两个系统动作: 「在文件夹中显示」(`explorer.exe /select,<绝对路径>`, 打开资源管理器并选中文件)与「用默认应用打开」(`cmd /c start "" <绝对路径>`)。
+- 接口 POST /api/artifacts/:id/open, body `{action:'reveal'|'open'}`; 只对已登记产物生效, 越界 409 artifact_outside_workspace、未登记 404 artifact_not_found、文件已消失 409 artifact_missing, action 非法 422 invalid_action。
+- 网页预览收紧为白名单: 只有 text/* 与 json/yaml/toml/csv/xml(+xml) 直接渲染; docx/xlsx/pptx 等(openxmlformats|officedocument)与二进制不再当文本显示, 改为提示用默认应用打开。产物列表的类型标签也从完整 mime 串改为 word/excel/slides/plain 这类短名。
+- 验证: 真机点过两个按钮(docx 产物), 资源管理器选中成功、Word 默认关联成功, 提示文案分别为「已在文件管理器中选中该文件」「已交给系统默认应用打开」; API 侧 200/422/404 均已覆盖。
+
 ## 归档项目可查看与彻底删除
 
 - .local/archive/<taskId>/ 里放的是删除任务时保留的成果产物与 manifest.json。
 - 侧栏「归档」打开列表: 标题、任务 ID、文件数、总大小、归档时间、目标摘要; 每条可「彻底删除」(二次确认), 删除后目录立即消失, 不做二次留存。
 - 接口 GET /api/archive 与 DELETE /api/archive/:taskId; 后者只接受 ^[A-Za-z0-9_-]{1,80}$ 且必须落在归档根目录内, 非法返回 400、不存在返回 404。
-- 测试 	ests/archive.test.ts(2 项): 列表读 manifest 与统计、删除后目录消失、../etc 之类被拒。
+- 测试 tests/archive.test.ts(2 项): 列表读 manifest 与统计、删除后目录消失、../etc 之类被拒。
 
 ## 席位工作区/权限入口拆分
 
@@ -12,8 +19,8 @@
 ## 选择工作区与上传附件
 
 - 工作目录支持目录选择器(GET /api/fs/list 只读列目录 + 前端 DirectoryPicker), 新建任务与对话栏两处都能用。
-- 对话支持附件: POST /api/tasks/:id/attachments 把 base64 落盘到任务工作区 uploads/, 消息带 ttachments(迁移 6 新增 messages.attachments_json); 发模型时把绝对路径写进正文。
-- 测试 57 项(	ests/attachments.test.ts 覆盖落库与 schema 校验)。
+- 对话支持附件: POST /api/tasks/:id/attachments 把 base64 落盘到任务工作区 uploads/, 消息带 attachments(迁移 6 新增 messages.attachments_json); 发模型时把绝对路径写进正文。
+- 测试 57 项(tests/attachments.test.ts 覆盖落库与 schema 校验)。
 
 # 进度记录
 
