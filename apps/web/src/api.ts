@@ -20,11 +20,20 @@ export class ApiError extends Error {
 }
 
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const res = await fetch(path, {
-    method,
-    headers: body === undefined ? {} : { 'content-type': 'application/json' },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
+  let res: Response;
+  try {
+    res = await fetch(path, {
+      method,
+      headers: body === undefined ? {} : { 'content-type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+  } catch {
+    // 浏览器抛 "Failed to fetch" 基本都是后端没连上(服务已停止/正在重启), 换成能看懂的话
+    throw new ApiError(0, {
+      code: 'network_error',
+      message: '连不上后端服务(可能已停止或正在重启)。确认 npm start 仍在运行后刷新页面。',
+    });
+  }
   const text = await res.text();
   const json = text ? (JSON.parse(text) as unknown) : null;
   if (!res.ok) {
