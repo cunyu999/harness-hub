@@ -45,6 +45,8 @@ import type {
 import { extractJson } from '../../adapters/src/envelope.js';
 import { EventBus } from './bus.js';
 import { selectDispatchable, allTerminal, executionSettled, type DispatchItem } from './scheduler.js';
+import { addUsage, emptyUsage, normalizeUsage } from './usage.js';
+import type { TaskUsage, TaskUsageTotals } from '../../contracts/src/events.js';
 import {
   buildDeliveryPrompt,
   buildDiscussionCritiquePrompt,
@@ -140,6 +142,8 @@ const PHASE_ORDER: TaskPhase[] = [
 export class Engine implements AdapterHost {
   readonly bus = new EventBus();
   private readonly live = new Map<string, LiveSession>();
+  /** 每个 attempt 最近一次上报的 token 用量(实时, 落库前用)。 */
+  private readonly liveUsage = new Map<string, TaskUsageTotals>();
   private readonly locks = new Map<string, Promise<unknown>>();
   private readonly pumping = new Set<string>();
   private readonly stageBusy = new Set<string>();
@@ -526,7 +530,25 @@ export class Engine implements AdapterHost {
       messages: this.repo.listMessages(taskId, 200),
       highWaterSeq,
       limits: task.limits,
+      usage: this.computeTaskUsage(taskId),
     };
+  }
+
+  /** 从已落库的 attempts.result 里累计 token 用量(按席位拆分)。 */
+  private computeTaskUsage(taskId: string): TaskUsage {
+    const byParticipant: Record<string, TaskUsageTotals> = {};
+    let total = emptyUsage();
+    let turns = 0;
+    for (const attempt of this.repo.listAttempts(taskId)) {
+      const result = attempt.result as { usageTokens?: unknown; usage?: unknown } | null;
+      const tokens = normalizeUsage(result?.usageTokens) ?? normalizeUsage(result?.usage);
+      if (!tokens) continue;
+      turns += 1;
+      total = addUsage(total, tokens);
+      const pid = attempt.participantId ?? 'unknown';
+      byParticipant[pid] = addUsage(byParticipant[pid] ?? emptyUsage(), tokens);
+    }
+    return { total, byParticipant, turns };
   }
 
   private requireTask(taskId: string): TaskRecord {
@@ -873,7 +895,12 @@ export class Engine implements AdapterHost {
         endedAt: nowIso(),
         errorClass: outcome.errorClass,
         errorMessage: outcome.errorMessage,
-        result: { text: truncate(outcome.text, 20000), observedModel: outcome.observedModel, usage: outcome.usage },
+        result: {
+          text: truncate(outcome.text, 20000),
+          observedModel: outcome.observedModel,
+          usage: outcome.usage,
+          usageTokens: this.liveUsage.get(attemptId) ?? normalizeUsage(outcome.usage) ?? null,
+        },
       });
       this.emit(outcome.status === 'completed' ? 'attempt.completed' : outcome.status === 'cancelled' ? 'attempt.interrupted' : 'attempt.failed', {
         taskId: task.id,
@@ -936,6 +963,7 @@ export class Engine implements AdapterHost {
         sessionRow: this.repo.getSession(sessionRowId)!,
       };
     } finally {
+      this.liveUsage.delete(attemptId);
       if (session) {
         this.live.delete(session.localId);
         await session.close().catch(() => undefined);
@@ -1034,6 +1062,16 @@ export class Engine implements AdapterHost {
       }
       case 'tool.completed': {
         this.emit('tool.completed', { ...base, payload: { callId: ev.callId, ok: ev.ok, outputSummary: ev.outputSummary } });
+        break;
+      }
+      case 'usage': {
+        const tokens = normalizeUsage(ev.usage);
+        if (!tokens) break;
+        this.liveUsage.set(live.attemptId, tokens);
+        this.emit('usage.updated', {
+          ...base,
+          payload: { participantId: live.participantId, tokens, live: true },
+        });
         break;
       }
       case 'activity': {

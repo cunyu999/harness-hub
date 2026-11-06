@@ -28,6 +28,7 @@ export type EventType =
   | 'attempt.interrupted'
   | 'monitor.no_recent_event'
   | 'monitor.health_changed'
+  | 'usage.updated'
   | 'plan.proposed'
   | 'plan.revised'
   | 'plan.approved'
@@ -57,6 +58,21 @@ export interface EventEnvelope {
   payload: Record<string, unknown>;
 }
 
+/** 一次调用的 token 用量(已归一化, 各 harness 原始字段不同)。 */
+export interface TaskUsageTotals {
+  input: number;
+  output: number;
+  cached: number;
+  total: number;
+}
+
+/** 整个任务的用量: 总数 + 按席位拆分 + 已结算回合数。 */
+export interface TaskUsage {
+  total: TaskUsageTotals;
+  byParticipant: Record<string, TaskUsageTotals>;
+  turns: number;
+}
+
 export interface TaskSnapshot {
   task: import('./types.js').TaskRecord;
   participants: import('./types.js').Participant[];
@@ -75,6 +91,7 @@ export interface TaskSnapshot {
   messages: import('./types.js').TaskMessage[];
   highWaterSeq: number;
   limits: import('./types.js').TaskLimits;
+  usage: TaskUsage;
 }
 
 export interface HealthResponse {

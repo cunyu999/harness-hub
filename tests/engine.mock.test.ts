@@ -170,6 +170,12 @@ test('单强模型: 计划 → 批准 → 执行 → 审核 → 交付', async (
     for (const t of ['plan.proposed', 'plan.approved', 'work_item.queued', 'artifact.registered', 'verification.recorded', 'review.recorded', 'delivery.updated']) {
       assert.ok(types.has(t as never), `缺少事件 ${t}`);
     }
+    // token 用量: mock 每回合都会上报, 快照必须聚合出来, 且按席位拆开
+    const usageSnap = engine.snapshot(task.id).usage;
+    assert.ok(usageSnap.total.total > 0, '结算后应累计到 token 用量');
+    assert.ok(usageSnap.turns > 0, '应记录已结算回合数');
+    assert.ok(Object.keys(usageSnap.byParticipant).length > 0, '应按席位拆分用量');
+    assert.ok(events.some((e) => e.type === 'usage.updated'), '应有 usage.updated 实时事件');
     const seqs = events.map((e) => e.seq);
     assert.deepEqual(seqs, [...seqs].sort((a, b) => a - b), '事件 seq 必须单调递增');
   } finally {

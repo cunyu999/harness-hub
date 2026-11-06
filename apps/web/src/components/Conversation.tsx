@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { TaskDetail } from '../api';
 import { api } from '../api';
 import type { StreamDelta } from '../store';
-import { clock, initials, shortId } from '../lib/format';
+import { clock, initials, shortId, tokens } from '../lib/format';
 import { DirectoryPicker } from './DirectoryPicker';
 import type { EventEnvelope } from '../../../../packages/contracts/src/events';
 import { liveStatus } from '../lib/live';
@@ -48,6 +48,7 @@ export function Conversation({
   detail,
   deltas,
   events,
+  usageLive,
   onChanged,
   target,
   onTargetChange,
@@ -56,6 +57,8 @@ export function Conversation({
   detail: TaskDetail;
   deltas: StreamDelta[];
   events: EventEnvelope[];
+  /** 进行中的实时 token 用量(按 attempt)。 */
+  usageLive?: { attemptId: string; participantId: string | null; total: number; input: number; output: number; cached: number }[];
   onChanged: () => void;
   target: string | null;
   onTargetChange: (participantId: string | null) => void;
@@ -147,6 +150,9 @@ export function Conversation({
   const currentId = target ?? lead?.id ?? null;
   const [tick, setTick] = useState(() => Date.now());
   const live = liveStatus(detail, events, currentId, tick);
+  const liveTokens = (usageLive ?? [])
+    .filter((u) => !currentId || u.participantId === currentId)
+    .reduce((sum, u) => sum + u.total, 0);
   useEffect(() => {
     if (!live || live.tone !== 'run') return undefined;
     const t = window.setInterval(() => setTick(Date.now()), 1000);
@@ -592,6 +598,7 @@ export function Conversation({
             {live.since ? (
               <span className="live-time">{fmtElapsed(tick - live.since)}</span>
             ) : null}
+            {liveTokens > 0 ? <span className="live-time" title="本回合最近一次上报的 token 用量">· {tokens(liveTokens)} tokens</span> : null}
           </div>
         ) : null}
         {pendingFiles.length > 0 ? (

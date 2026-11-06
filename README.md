@@ -260,6 +260,21 @@ DELETE /api/archive/:taskId      # 彻底删除一个归档(只接受 task_xxx �
 POST /api/artifacts/:id/open     # body: {"action":"reveal"|"open"}
 ```
 
+### token 用量
+
+工作过程和结果都能看到真实用量, 全部来自 harness 原生上报, 不估算、不计费:
+
+- **任务头**: `Σ 12.3K tokens` 是已结算回合的累计; 回合进行中额外显示青色 `进行中 +362 tokens`;
+- **席位卡**: 卡片脚注显示该席位累计用量(如 `已完成 · 1s 前 · 1.5K tokens`);
+- **席位详情**: 「token 用量」一行给出总数与 `输入 / 输出 / 缓存命中` 拆分;
+- **对话状态条**: 正在跑的那个回合显示 `· 1.2K tokens`, 随事件即时增长。
+
+归一化在 `packages/core/src/usage.ts`: Claude 的 `input_tokens/cache_read_input_tokens/...`、
+Codex 的 `thread/tokenUsage/updated`(`last` 优先)、DSH 的 `session/prompt` 返回用量、
+mock 的确定性数字都统一成 `{input, output, cached, total}`; 认不出的形状返回 `null`, 不编造 0。
+
+事件流里有一条 `usage.updated`, 任务快照里多了 `usage: { total, byParticipant, turns }`。
+
 ## 界面
 
 真实事件驱动: 画布上的每个状态、每条连线都来自服务端事件与会话快照, 不含模拟动画。

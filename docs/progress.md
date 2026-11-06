@@ -1,3 +1,13 @@
+## token 用量: 过程和结果都能看到真实数字
+
+- 契约: `TaskUsageTotals{input,output,cached,total}`、`TaskUsage{total,byParticipant,turns}`; 新增事件 `usage.updated`; 任务快照带 `usage`。
+- 归一化: `packages/core/src/usage.ts` 的 `normalizeUsage()` 兼容 Claude snake_case、Codex `last/turn/current` 嵌套、已归一化形状; 认不出返回 `null`(不编造 0)。`addUsage()` 负责累加。
+- 适配器上报: Claude(`result.usage`)、Codex(`thread/tokenUsage/updated`)、DSH(`session/prompt` 返回的 `usage`)、mock(确定性数字)都会实时 emit `{kind:'usage'}`。
+- 引擎: 实时写 `liveUsage`(attemptId → 用量)并 emit `usage.updated`; 回合落库时把归一化结果写进 `result.usageTokens`; `snapshot()` 用 `computeTaskUsage()` 聚合总量、按席位拆分、已结算回合数。
+- 界面: 任务头 `Σ x tokens` + 进行中 `+x tokens`; 席位卡脚注; 席位详情「token 用量」行(含输入/输出/缓存拆分); 对话状态条 `· x tokens`。
+- 测试: `tests/usage.test.ts` 5 项(Claude/Codex/已归一化/无数据/累加), 并在 `tests/engine.mock.test.ts` 断言 mock 任务结算后 `usage.total.total>0`、`turns>0`、`byParticipant` 非空、事件流含 `usage.updated`。全套 64/64 通过。
+- 实测: 慢速 mock 任务中途截图显示 `Σ 809 tokens / 进行中 +362 tokens`, 完成后 `Σ 1.9K tokens`、主控 1.5K、执行者 362。
+
 ## 新建任务: 每个席位的工作区/权限改成两个独立按钮
 
 - 以前每个席位是一行「权限下拉 + 路径输入框」, 不知道填什么; 现在每个席位是一张卡: 顶部 `强模型·主控 / 名字` + 两个按钮「工作区」「权限」, 下方摘要行直接写出当前生效值, 例如 `planner/claude-code · 跟随角色默认(完全权限)`。

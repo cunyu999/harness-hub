@@ -512,6 +512,7 @@ class ClaudeSession implements AdapterSession {
           const subtype = String(msg.subtype ?? '');
           if (typeof msg.result === 'string' && msg.result.length > 0) text = msg.result;
           usage = (msg.usage ?? null) as Record<string, unknown> | null;
+          if (usage) this.emit({ kind: 'usage', usage });
           if (subtype === 'success') status = 'completed';
           else if (subtype === 'error_max_turns') {
             status = 'failed';

@@ -136,6 +136,25 @@ export function bytes(n: number): string {
   return `${(n / 1024 / 1024).toFixed(2)} MB`;
 }
 
+/** token 数量: 1234 → 1.2K, 1234567 → 1.23M。 */
+export function tokens(n: number | null | undefined): string {
+  if (n === null || n === undefined || !Number.isFinite(n) || n <= 0) return '0';
+  if (n < 1000) return String(Math.round(n));
+  if (n < 10000) return `${(n / 1000).toFixed(1)}K`;
+  if (n < 1000000) return `${Math.round(n / 1000)}K`;
+  return `${(n / 1000000).toFixed(2)}M`;
+}
+
+/** 拆开显示输入/输出/缓存, 只列非零项。 */
+export function tokenParts(u: { input: number; output: number; cached: number } | null | undefined): string {
+  if (!u) return '无用量记录';
+  const parts: string[] = [];
+  if (u.input > 0) parts.push(`输入 ${tokens(u.input)}`);
+  if (u.output > 0) parts.push(`输出 ${tokens(u.output)}`);
+  if (u.cached > 0) parts.push(`缓存命中 ${tokens(u.cached)}`);
+  return parts.length > 0 ? parts.join(' · ') : '无用量记录';
+}
+
 export function roleLabel(role: string): string {
   switch (role) {
     case 'strong':

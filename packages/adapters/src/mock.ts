@@ -219,6 +219,12 @@ export class MockAdapter implements HarnessAdapter {
           }
 
           const text = self.renderTurn(parsed, opts, emit, settleActivity);
+          const mockUsage = {
+            input_tokens: 120 + (parsed.kind ?? '').length,
+            output_tokens: Math.max(20, Math.ceil(text.length / 2)),
+            cache_read_input_tokens: 64,
+          };
+          emit({ kind: 'usage', usage: mockUsage });
           for (let i = 0; i < text.length; i += 120) {
             if (state.cancelled) return self.cancelledOutcome(started, state);
             await sleep(delay);
@@ -234,7 +240,7 @@ export class MockAdapter implements HarnessAdapter {
             errorMessage: null,
             observedModel: state.inspection.observedModel,
             reportedReasoning: null,
-            usage: null,
+            usage: mockUsage,
             durationMs: Date.now() - started,
           };
         } finally {

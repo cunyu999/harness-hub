@@ -38,6 +38,7 @@ interface PromptWaiter {
   startedAt: number;
   stopReason: string | null;
   settle: boolean;
+  usage: Record<string, unknown> | null;
 }
 
 export class DshAdapter implements HarnessAdapter {
@@ -519,6 +520,7 @@ class DshSession implements AdapterSession {
       startedAt,
       stopReason: null,
       settle: false,
+      usage: null,
     };
     const done = new Promise<TurnOutcome>((resolve) => {
       waiter.resolve = resolve;
@@ -549,6 +551,11 @@ class DshSession implements AdapterSession {
         return emptyOutcome;
       }
       waiter.stopReason = r.stopReason ? String(r.stopReason) : null;
+      const rawUsage = (r.usage ?? r.tokenUsage ?? null) as Record<string, unknown> | null;
+      if (rawUsage) {
+        waiter.usage = rawUsage;
+        this.emit({ kind: 'usage', usage: rawUsage });
+      }
     } catch (err) {
       if (!waiter.settle) {
         this.settleWaiter({
@@ -593,7 +600,7 @@ class DshSession implements AdapterSession {
       errorMessage: o.errorMessage ?? null,
       observedModel: this.observedModel,
       reportedReasoning: this.observedReasoning,
-      usage: null,
+      usage: w.usage ?? null,
       durationMs: Date.now() - w.startedAt,
     });
   }

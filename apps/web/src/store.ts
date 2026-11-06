@@ -11,6 +11,16 @@ export interface StreamDelta {
   updatedAt: number;
 }
 
+export interface LiveUsage {
+  attemptId: string;
+  participantId: string | null;
+  input: number;
+  output: number;
+  cached: number;
+  total: number;
+  at: number;
+}
+
 export type ConnState = 'connecting' | 'live' | 'reconnecting';
 
 export interface TaskState {
@@ -20,6 +30,8 @@ export interface TaskState {
   conn: ConnState;
   error: string | null;
   lastEventAt: number | null;
+  /** 还没结算的回合最近一次上报的用量(用于"进行中"实时显示)。 */
+  usageLive: LiveUsage[];
   reload: () => void;
 }
 
@@ -36,6 +48,7 @@ export function useTask(taskId: string | null): TaskState {
   const [conn, setConn] = useState<ConnState>('connecting');
   const [error, setError] = useState<string | null>(null);
   const [lastEventAt, setLastEventAt] = useState<number | null>(null);
+  const [usageLive, setUsageLive] = useState<LiveUsage[]>([]);
   const cursor = useRef(0);
   const reloadTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const esRef = useRef<EventSource | null>(null);
@@ -85,6 +98,7 @@ export function useTask(taskId: string | null): TaskState {
     cursor.current = 0;
     setEvents([]);
     setDeltas([]);
+    setUsageLive([]);
     setConn('connecting');
 
     void load(taskId).then(() => {
@@ -132,6 +146,7 @@ export function useTask(taskId: string | null): TaskState {
         'request.resolved',
         'monitor.no_recent_event',
         'monitor.health_changed',
+        'usage.updated',
         'plan.proposed',
         'plan.revised',
         'plan.approved',
@@ -163,6 +178,29 @@ export function useTask(taskId: string | null): TaskState {
           const next = prev.concat(env as EventEnvelope);
           return next.length > MAX_EVENTS ? next.slice(next.length - MAX_EVENTS) : next;
         });
+        if (env.type === 'usage.updated') {
+          const p = env.payload as { participantId?: string; tokens?: Record<string, number> };
+          const t = p.tokens ?? {};
+          const attemptId = env.attemptId ?? '';
+          if (attemptId) {
+            const entry: LiveUsage = {
+              attemptId,
+              participantId: p.participantId ?? null,
+              input: Number(t.input ?? 0),
+              output: Number(t.output ?? 0),
+              cached: Number(t.cached ?? 0),
+              total: Number(t.total ?? 0),
+              at: Date.now(),
+            };
+            setUsageLive((prev) => {
+              const idx = prev.findIndex((x) => x.attemptId === attemptId);
+              if (idx < 0) return prev.concat(entry).slice(-12);
+              const copy = prev.slice();
+              copy[idx] = entry;
+              return copy;
+            });
+          }
+        }
         if (env.type === 'message.delta') {
           const p = env.payload as { text?: string; role?: string };
           const text = p.text ?? '';
@@ -190,7 +228,10 @@ export function useTask(taskId: string | null): TaskState {
         // 回合结束(含失败/中断)后增量气泡没有意义: 结构化结果已进快照与消息
         if (env.type === 'attempt.completed' || env.type === 'attempt.failed' || env.type === 'attempt.interrupted') {
           const attemptId = env.attemptId;
-          if (attemptId) setDeltas((prev) => prev.filter((d) => d.attemptId !== attemptId));
+          if (attemptId) {
+            setDeltas((prev) => prev.filter((d) => d.attemptId !== attemptId));
+            setUsageLive((prev) => prev.filter((u) => u.attemptId !== attemptId));
+          }
         }
         if ((env.type as string) === 'resync_required') {
           cursor.current = 0;
@@ -221,8 +262,8 @@ export function useTask(taskId: string | null): TaskState {
   }, [taskId, load]);
 
   return useMemo(
-    () => ({ detail, events, deltas, conn, error, lastEventAt, reload }),
-    [detail, events, deltas, conn, error, lastEventAt, reload],
+    () => ({ detail, events, deltas, conn, error, lastEventAt, usageLive, reload }),
+    [detail, events, deltas, conn, error, lastEventAt, usageLive, reload],
   );
 }
 

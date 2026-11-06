@@ -454,6 +454,7 @@ class CodexSession implements AdapterSession {
       }
       case 'thread/tokenUsage/updated': {
         if (this.pending) this.pending.usage = (p.tokenUsage ?? null) as Record<string, unknown> | null;
+        if (p.tokenUsage) this.emit({ kind: 'usage', usage: p.tokenUsage as Record<string, unknown> });
         break;
       }
       default:

@@ -15,6 +15,8 @@ import {
   duration,
   shortId,
   stamp,
+  tokenParts,
+  tokens,
 } from '../lib/format';
 import type { EventEnvelope } from '../../../../packages/contracts/src/events';
 
@@ -121,6 +123,12 @@ export function NodeDetail({
 }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+
+  const participantUsage = useMemo(() => {
+    const pid = selection?.kind === 'participant' ? selection.id : null;
+    const u = pid ? detail.usage.byParticipant[pid] : undefined;
+    return u ?? { input: 0, output: 0, cached: 0, total: 0 };
+  }, [detail.usage.byParticipant, selection]);
 
   const participant = useMemo(
     () => (selection?.kind === 'participant' ? detail.participants.find((p) => p.id === selection.id) ?? null : null),
@@ -528,6 +536,17 @@ export function NodeDetail({
         </dd>
         <dt>本次耗时</dt>
         <dd>{elapsed ? <span className="mono">{elapsed}</span> : running ? '刚开始' : '—'}</dd>
+        <dt>token 用量</dt>
+        <dd title="按已结算回合累计, 实时用量见卡片与任务头">
+          {participantUsage.total > 0 ? (
+            <>
+              <span className="mono">{tokens(participantUsage.total)}</span>
+              <span className="muted small"> · {tokenParts(participantUsage)}</span>
+            </>
+          ) : (
+            <span className="muted">暂无记录</span>
+          )}
+        </dd>
       </dl>
 
       {participant.isLead && detail.plan ? (

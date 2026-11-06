@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { TaskDetail } from '../api';
 import type { EventEnvelope } from '../../../../packages/contracts/src/events';
 import type { ManagedSession, Participant, RunAttempt, TaskPhase, WorkItem } from '../../../../packages/contracts/src/types';
-import { PHASE_LABEL, duration } from '../lib/format';
+import { PHASE_LABEL, duration, tokens } from '../lib/format';
 
 export type GraphSelection =
   | { kind: 'participant'; id: string }
@@ -43,6 +43,8 @@ interface Seat {
   tone: Tone;
   stateLabel: string;
   elapsedMs: number | null;
+  /** 该席位累计 token 用量(已结算回合)。 */
+  usageTokens: number;
   works: WorkItem[];
   session: ManagedSession | null;
   root: boolean;
@@ -360,7 +362,7 @@ function nodeOfSeat(seat: Seat, ordinal?: number): NodeModel {
     big: `${elapsed} · ${
       total > 0 ? `${total} 项` : seat.root ? '调度' : seat.roleLabel === '强模型' ? '审核' : '待派发'
     }`,
-    foot: `${seat.stateLabel} · ${last}`,
+    foot: `${seat.stateLabel} · ${last}${seat.usageTokens > 0 ? ` · ${tokens(seat.usageTokens)} tokens` : ''}`,
     pct: total > 0 ? Math.round((accepted / total) * 100) : null,
     tone: seat.tone,
     accent: seat.accent,
@@ -546,6 +548,7 @@ function buildSeats(detail: TaskDetail, events: EventEnvelope[]): Seat[] {
       return sum + Math.max(0, end - start);
     }, 0);
     const elapsedMs = attempts.length > 0 ? spentMs : null;
+    const usageTokens = detail.usage.byParticipant[p.id]?.total ?? 0;
     const roleLabel = p.isLead ? '主控' : p.role === 'strong' ? '强模型' : '执行者';
 
     return {
@@ -559,6 +562,7 @@ function buildSeats(detail: TaskDetail, events: EventEnvelope[]): Seat[] {
       tone,
       stateLabel,
       elapsedMs,
+      usageTokens,
       works,
       session,
       root: Boolean(p.isLead),

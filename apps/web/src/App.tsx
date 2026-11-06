@@ -7,7 +7,7 @@ import { PlanPanel } from './components/PlanPanel';
 import { ApprovalPanel, ArtifactPanel, EventTimeline, ReviewPanel } from './components/Panels';
 import { Conversation } from './components/Conversation';
 import { ArchivePanel, NewTaskDialog, ProfilesPanel } from './components/Dialogs';
-import { LIFECYCLE_LABEL, LIFECYCLE_TONE, PHASES, PHASE_LABEL, clock, shortId } from './lib/format';
+import { LIFECYCLE_LABEL, LIFECYCLE_TONE, PHASES, PHASE_LABEL, clock, shortId, tokenParts, tokens } from './lib/format';
 import { useTheme } from './lib/theme';
 import { usePageLifecycle } from './lib/runtime';
 
@@ -281,10 +281,26 @@ export function App() {
               <span className="mono muted" style={{ fontSize: 10.5 }}>
                 v{detail.task.version} · 参与者 r{detail.task.participantsRevision}
               </span>
+              <span
+                className="chip"
+                title={`本任务已累计 ${detail.usage.total.total} tokens(${tokenParts(detail.usage.total)}), 已结算 ${detail.usage.turns} 个回合`}
+              >
+                {detail.usage.total.total > 0 ? `Σ ${tokens(detail.usage.total.total)} tokens` : 'Σ 0 tokens'}
+              </span>
               {detail.task.errorCode ? <span className="chip red" title={detail.task.errorMessage ?? ''}>{detail.task.errorCode}</span> : null}
             </>
           ) : null}
           <div className="taskbar-spacer" />
+          {detail && state.usageLive.length > 0 ? (
+            <span
+              className="chip cyan"
+              title={state.usageLive
+                .map((u) => `${detail.participants.find((p) => p.id === u.participantId)?.displayName ?? u.participantId}: ${tokenParts(u)}`)
+                .join('\n')}
+            >
+              进行中 +{tokens(state.usageLive.reduce((sum, u) => sum + u.total, 0))} tokens
+            </span>
+          ) : null}
           {detail && !TERMINAL.includes(detail.task.lifecycle) ? (
             <>
               {detail.task.lifecycle === 'paused' || detail.task.errorCode === 'restart_recovered' ? (
@@ -359,6 +375,7 @@ export function App() {
                   detail={detail}
                   deltas={state.deltas}
                   events={state.events}
+                  usageLive={state.usageLive}
                   onChanged={refresh}
                   target={chatTarget}
                   onTargetChange={setChatTarget}

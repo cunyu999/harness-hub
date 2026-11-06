@@ -53,8 +53,9 @@ export type AdapterEvent =
   | { kind: 'tool.started'; toolName: string; callId: string; inputSummary: string }
   | { kind: 'tool.progress'; callId: string; text: string }
   | { kind: 'tool.completed'; callId: string; ok: boolean; outputSummary: string }
+  | { kind: 'usage'; usage: Record<string, unknown> }
   | {
-      kind: 'approval.requested';
+      kind: 'approval.requested'
       requestId: string;
       approvalKind: string;
       title: string;
