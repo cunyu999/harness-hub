@@ -3215,3 +3215,43 @@ a.link:hover {
 @media (prefers-reduced-motion: reduce) {
   .conv-live.run .dot { animation: none; }
 }
+
+/* ----------------------------- 工作项状态点 -------------------------- */
+.state {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-2);
+  white-space: nowrap;
+  --dot: var(--text-3);
+}
+
+.state::before {
+  content: '';
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--dot);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--dot) 20%, transparent);
+}
+
+.state.green { --dot: var(--ok); }
+.state.amber { --dot: var(--warn); }
+.state.red { --dot: var(--bad); }
+.state.violet { --dot: var(--accent); }
+.state.cyan { --dot: #4fd1c5; }
+.state.muted { --dot: var(--text-3); }
+
+table.grid tbody tr.rowclick { cursor: pointer; }
+table.grid tbody tr.rowclick:hover { background: color-mix(in oklab, var(--accent) 8%, transparent); }
+table.grid tbody tr.rowclick:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+.wi-goal { font-size: 12.5px; line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; margin: 0 0 8px; color: var(--text-1); }
+.wi-list { margin: 4px 0 0 16px; padding: 0; font-size: 11.5px; line-height: 1.6; }
+.wi-list li { margin-bottom: 3px; }
+.wi-empty { font-size: 11.5px; color: var(--text-3); margin: 2px 0 6px; }
+.attempt-row { display: grid; grid-template-columns: minmax(88px, 190px) 84px minmax(0, 1fr); gap: 8px; align-items: baseline; font-size: 11px; padding: 4px 0; border-bottom: 1px solid var(--line); }
+.attempt-row > span { min-width: 0; overflow-wrap: anywhere; }
+.attempt-row:last-child { border-bottom: none; }

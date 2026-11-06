@@ -250,7 +250,7 @@ DELETE /api/archive/:taskId      # 彻底删除一个归档(只接受 task_xxx �
 
 「产物」页签里选中任一产物后, 除了在网页里预览(文本、图片、PDF), 还可以交给系统处理:
 
-- **打开所在文件夹** —— 直接打开产物所在目录(`explorer.exe <目录>`), 不选中、不弹别的窗口;
+- **在文件夹中显示** —— 打开产物所在目录并**选中高亮该文件**(`explorer.exe /select,<绝对路径>`), 和 Codex 点产物后的行为一致;
 - **用默认应用打开** —— 走 Windows ShellExecute(`rundll32 url.dll,FileProtocolHandler <绝对路径>`, 失败再退 `powershell Start-Process -FilePath`), 适合 docx/xlsx/exe 这类网页里不该渲染的文件; 命令非 0 退出会把真实 stderr 返回给前端(`500 open_failed`), 不再假装成功。
 
 两个动作都只在**已登记且工作区内存在**的产物上生效, 越界、未登记、文件已删除分别返回 `409 artifact_outside_workspace` / `404 artifact_not_found` / `409 artifact_missing`。
@@ -259,6 +259,16 @@ DELETE /api/archive/:taskId      # 彻底删除一个归档(只接受 task_xxx �
 ```bash
 POST /api/artifacts/:id/open     # body: {"action":"reveal"|"open"}
 ```
+
+### 计划栏与工作项详情
+
+计划页签的「工作项」表格只留三列(目标 / 执行者 / 状态), 列宽按内容分配: 目标拿 ~60%, 执行者 96px, 状态 72px。
+状态用**彩色圆点 + 中性文字**(不铺底色), 一屏多行时更安静, 也不至于只靠颜色分辨。
+
+**点表格里的任意一行**(或聚焦后按 Enter / 空格)会打开工作项详情, 里面是完整信息:
+原始「目标」全文(不再被列宽挤压)、依赖、写入范围、输入、预期产物、验收标准、
+执行记录(阶段/状态/起止时间)、该项产出的产物、验证记录, 以及最后一轮的执行结论与未解决问题。
+数据全部来自任务快照, 详情里不额外调用模型。
 
 ### token 用量
 

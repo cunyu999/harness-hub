@@ -1,3 +1,11 @@
+## 计划栏: 列宽、点状状态、工作项详情
+
+- 表格只留三列并固定宽度: 目标 auto(约 60%)、执行者 96px、状态 72px; 表头去掉 letter-spacing / uppercase, 中文不再被拆成「目 标」。
+- 状态列改成「彩色圆点 + 中性文字」(.state + --dot), 去掉胶囊底色; 圆点用 color-mix 做 20% 光晕, 深浅色都成立。
+- 工作项行可点击(或 Enter / 空格)打开 WorkItemDetail: 完整目标、依赖、写入范围、输入、预期产物、验收标准、执行记录(阶段/状态/时间)、产物、验证、最后一轮结论与未解决问题; 数据来自任务快照, 不额外调用模型。
+- 踩坑: 长 checkId(如 exists:deliverables/body.txt)会把 grid 三列挤错位, 改成 minmax(88px,190px) 84px 1fr 并给子项 overflow-wrap: anywhere。
+- 与 Codex 对齐: 产物「在文件夹中显示」改为 explorer.exe /select,<绝对路径>, 打开目录的同时选中高亮该文件。
+
 ## token 用量: 过程和结果都能看到真实数字
 
 - 契约: `TaskUsageTotals{input,output,cached,total}`、`TaskUsage{total,byParticipant,turns}`; 新增事件 `usage.updated`; 任务快照带 `usage`。

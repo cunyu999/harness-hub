@@ -86,6 +86,12 @@ export const ACTIVITY_LABEL: Record<MonitorActivity, string> = {
   unknown: '未知',
 };
 
+export const RISK_LABEL: Record<string, string> = {
+  low: '低',
+  medium: '中',
+  high: '高',
+};
+
 export const VERDICT_LABEL: Record<string, string> = {
   approve: '通过',
   changes_required: '需要修改',
@@ -189,4 +195,15 @@ export function initials(name: string): string {
     .slice(0, 2)
     .map((w) => (Array.from(w)[0] ?? '').toUpperCase())
     .join('');
+}
+
+/** 产物类型的短名, 避免把完整 mime 串塞进小标签。 */
+export function shortType(mediaType: string): string {
+  if (/wordprocessingml/.test(mediaType)) return 'word';
+  if (/spreadsheetml/.test(mediaType)) return 'excel';
+  if (/presentationml/.test(mediaType)) return 'slides';
+  if (mediaType === 'application/pdf') return 'pdf';
+  if (mediaType === 'application/octet-stream') return 'binary';
+  const sub = mediaType.split('/')[1] ?? mediaType;
+  return sub.replace(/^x-/, '').replace(/^vnd\./, '').slice(0, 14);
 }

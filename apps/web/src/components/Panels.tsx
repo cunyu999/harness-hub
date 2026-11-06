@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { TaskDetail } from '../api';
 import { api } from '../api';
-import { VERDICT_LABEL, VERDICT_TONE, ago, bytes, clock, shortId, stamp } from '../lib/format';
+import { VERDICT_LABEL, VERDICT_TONE, ago, bytes, clock, shortId, shortType, stamp } from '../lib/format';
 import type { EventEnvelope } from '../../../../packages/contracts/src/events';
 
 /* ---------------------------- 审批 / 用户输入 ---------------------------- */
@@ -145,17 +145,6 @@ export function ReviewPanel({ detail }: { detail: TaskDetail }) {
 }
 
 /* -------------------------------- 产物 -------------------------------- */
-
-/** 产物的短类型名, 避免把完整的 mime 串塞进一行小标签。 */
-function shortType(mediaType: string): string {
-  if (/wordprocessingml/.test(mediaType)) return 'word';
-  if (/spreadsheetml/.test(mediaType)) return 'excel';
-  if (/presentationml/.test(mediaType)) return 'slides';
-  if (mediaType === 'application/pdf') return 'pdf';
-  if (mediaType === 'application/octet-stream') return 'binary';
-  const sub = mediaType.split('/')[1] ?? mediaType;
-  return sub.replace(/^x-/, '').replace(/^vnd\./, '').slice(0, 14);
-}
 
 /** 只有文本类产物才在网页里直接预览, 二进制不下载、不渲染。 */
 function isTextPreview(mediaType: string): boolean {

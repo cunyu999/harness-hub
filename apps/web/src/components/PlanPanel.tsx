@@ -2,10 +2,12 @@ import { useState } from 'react';
 import type { TaskDetail } from '../api';
 import { api } from '../api';
 import { ITEM_LABEL, ITEM_TONE, stamp } from '../lib/format';
+import { WorkItemDetail } from './WorkItemDetail';
 
 export function PlanPanel({ detail, onChanged }: { detail: TaskDetail; onChanged: () => void }) {
   const plan = detail.plan;
   const [note, setNote] = useState('');
+  const [openItemId, setOpenItemId] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const awaiting = detail.task.lifecycle === 'awaiting_plan_approval' && plan;
@@ -109,7 +111,19 @@ export function PlanPanel({ detail, onChanged }: { detail: TaskDetail; onChanged
             const live = detail.workItems.find((w) => w.planItemId === it.id);
             const p = detail.participants.find((x) => x.id === it.assignedParticipantId);
             return (
-              <tr key={it.id}>
+              <tr
+                key={it.id}
+                className="rowclick"
+                tabIndex={0}
+                title="点击查看工作项详情"
+                onClick={() => setOpenItemId(it.id)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    setOpenItemId(it.id);
+                  }
+                }}
+              >
                 <td>
                   <div>{it.goal}</div>
                   <div className="mono muted" style={{ fontSize: 10 }}>
@@ -118,7 +132,13 @@ export function PlanPanel({ detail, onChanged }: { detail: TaskDetail; onChanged
                   </div>
                 </td>
                 <td className="small">{p?.displayName ?? it.assignedParticipantId ?? '—'}</td>
-                <td>{live ? <span className={`chip ${ITEM_TONE[live.state]}`}>{ITEM_LABEL[live.state]}</span> : <span className="chip muted">未创建</span>}</td>
+                <td>
+                  {live ? (
+                    <span className={`state ${ITEM_TONE[live.state]}`}>{ITEM_LABEL[live.state]}</span>
+                  ) : (
+                    <span className="state muted">未创建</span>
+                  )}
+                </td>
               </tr>
             );
           })}
@@ -206,6 +226,13 @@ export function PlanPanel({ detail, onChanged }: { detail: TaskDetail; onChanged
       ) : null}
 
       {err && !awaiting ? <div className="err">{err}</div> : null}
+
+      {openItemId ? (
+        (() => {
+          const picked = items.find((x) => x.id === openItemId);
+          return picked ? <WorkItemDetail detail={detail} item={picked} onClose={() => setOpenItemId(null)} /> : null;
+        })()
+      ) : null}
     </div>
   );
 }
