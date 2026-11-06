@@ -875,6 +875,22 @@ table.grid tr:last-child td {
   border-bottom: none;
 }
 
+/* 计划栏在窄侧栏里: 中文表头不需要字距, 目标列给足宽度, 执行者/状态只占必要空间 */
+table.grid.plan-grid th {
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+table.grid.plan-grid td:nth-child(2) {
+  color: var(--text-2);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+table.grid.plan-grid td:nth-child(3) {
+  white-space: nowrap;
+}
+
 /* ------------------------------ 时间线 ------------------------------ */
 
 .tl {

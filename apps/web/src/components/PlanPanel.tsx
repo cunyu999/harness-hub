@@ -91,7 +91,12 @@ export function PlanPanel({ detail, onChanged }: { detail: TaskDetail; onChanged
       </div>
 
       <div className="panel-title">工作项 ({items.length})</div>
-      <table className="grid">
+      <table className="grid plan-grid">
+        <colgroup>
+          <col />
+          <col style={{ width: 96 }} />
+          <col style={{ width: 72 }} />
+        </colgroup>
         <thead>
           <tr>
             <th>目标</th>

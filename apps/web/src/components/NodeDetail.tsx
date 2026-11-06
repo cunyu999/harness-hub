@@ -645,6 +645,12 @@ export function NodeDetail({
         <div className="small muted">暂无尝试记录。</div>
       ) : (
         <table className="grid">
+          <colgroup>
+            <col style={{ width: 62 }} />
+            <col style={{ width: 74 }} />
+            <col style={{ width: 58 }} />
+            <col />
+          </colgroup>
           <thead>
             <tr>
               <th>阶段</th>
