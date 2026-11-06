@@ -32,6 +32,23 @@ export function NewTaskDialog({
   };
 
   const [pickingWorkspace, setPickingWorkspace] = useState(false);
+
+  /** 席位工作区同样优先用 Windows 自带选择框, 失败才回退到网页内浏览。 */
+  const pickSeatNative = async (seatId: string) => {
+    const current = (seatDraft[seatId]?.ws ?? '').trim();
+    const initial = /^[A-Za-z]:[\\/]/.test(current) ? current : null;
+    try {
+      const res = await api.pickDirectory(initial);
+      if (res.path) {
+        setSeatDraft((prev) => ({
+          ...prev,
+          [seatId]: { ...(prev[seatId] ?? { ws: '', sandbox: '' }), ws: res.path as string },
+        }));
+      }
+    } catch {
+      setPickingSeat(seatId);
+    }
+  };
   // 角色默认权限: planner 默认完全权限, worker 默认工作区内可写; 建好任务后仍可在对话栏逐个改
   const [plannerSandbox, setPlannerSandbox] = useState<'read-only' | 'workspace-write' | 'danger-full-access'>(
     'danger-full-access',
@@ -44,6 +61,10 @@ export function NewTaskDialog({
   const [workers, setWorkers] = useState<string[]>([]);
   // 逐席位覆盖: 留空 = 按角色默认(planner 完全权限 / worker 工作区内可写)
   const [seatDraft, setSeatDraft] = useState<Record<string, { ws: string; sandbox: '' | SandboxMode }>>({});
+  // 每个席位只展开一个面板: 工作区 / 权限
+  const [seatPanel, setSeatPanel] = useState<Record<string, 'ws' | 'sandbox' | undefined>>({});
+  // 给哪个席位选目录(绝对路径)
+  const [pickingSeat, setPickingSeat] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -212,38 +233,106 @@ export function NewTaskDialog({
         </div>
 
         <div className="field">
-          <label>每个 harness 的工作区与权限(可留空 = 用角色默认)</label>
+          <label>每个 harness 的工作区与权限</label>
           <div className="field-hint">
-            默认: 强模型(planner)完全权限、执行者(worker)工作区内可写。每个席位会在自己的角色大工作区里
-            (planner/ 或 worker/)自动建一个属于自己的小工作区; 这里可以改成相对任务工作区的路径(例如
-            planner/claude-a)或绝对路径。建好任务后也能在对话栏里逐个席改。
+            不填就是按角色默认: 强模型(planner)完全权限、执行者(worker)工作区内可写; 工作区默认落在
+            <code> planner/&lt;席位&gt;</code> 或 <code>worker/&lt;席位&gt;</code>。要改就点对应按钮:
+            「工作区」可以填相对路径, 也可以直接选一个本机目录; 「权限」三档任选。建好任务后还能在对话栏里逐个改。
           </div>
           {seatList.length === 0 ? <div className="small muted">先选择参与者。</div> : null}
           {seatList.map((seat) => {
             const draft = seatDraft[seat.id] ?? { ws: '', sandbox: '' as const };
+            const panel = seatPanel[seat.id];
+            const roleDefaultWs = `${seat.role === 'strong' ? 'planner' : 'worker'}/${slug(seat.profile?.name ?? 'seat')}`;
+            const roleDefaultSandbox = seat.role === 'strong' ? '完全权限' : '工作区内可写';
+            const sandboxLabel =
+              draft.sandbox === 'read-only'
+                ? '只读'
+                : draft.sandbox === 'workspace-write'
+                  ? '工作区内可写'
+                  : draft.sandbox === 'danger-full-access'
+                    ? '完全权限'
+                    : `跟随角色默认(${roleDefaultSandbox})`;
             return (
-              <div key={seat.id} className="seat-row">
-                <span className={`seat-tag ${seat.role}`}>
-                  {seat.role === 'strong' ? '强模型' : '执行者'}
-                  {seat.isLead ? ' · 主控' : ''}
-                </span>
-                <span className="seat-name">{seat.profile?.name ?? seat.id}</span>
-                <select
-                  value={draft.sandbox}
-                  onChange={(e) =>
-                    setSeatDraft((prev) => ({ ...prev, [seat.id]: { ...draft, sandbox: e.target.value as '' | SandboxMode } }))
-                  }
-                >
-                  <option value="">权限跟随角色默认</option>
-                  <option value="read-only">只读</option>
-                  <option value="workspace-write">工作区内可写</option>
-                  <option value="danger-full-access">完全权限</option>
-                </select>
-                <input
-                  value={draft.ws}
-                  placeholder={`例如 ${seat.role === 'strong' ? 'planner' : 'worker'}/${slug(seat.profile?.name ?? 'seat')}`}
-                  onChange={(e) => setSeatDraft((prev) => ({ ...prev, [seat.id]: { ...draft, ws: e.target.value } }))}
-                />
+              <div key={seat.id} className="seat-card">
+                <div className="seat-head">
+                  <span className={`seat-tag ${seat.role}`}>
+                    {seat.role === 'strong' ? '强模型' : '执行者'}
+                    {seat.isLead ? ' · 主控' : ''}
+                  </span>
+                  <span className="seat-name">{seat.profile?.name ?? seat.id}</span>
+                  <span className="seat-spacer" />
+                  <button
+                    type="button"
+                    className={`btn sm ${panel === 'ws' ? 'primary' : 'ghost'}`}
+                    onClick={() => setSeatPanel((p) => ({ ...p, [seat.id]: p[seat.id] === 'ws' ? undefined : 'ws' }))}
+                  >
+                    工作区
+                  </button>
+                  <button
+                    type="button"
+                    className={`btn sm ${panel === 'sandbox' ? 'primary' : 'ghost'}`}
+                    onClick={() =>
+                      setSeatPanel((p) => ({ ...p, [seat.id]: p[seat.id] === 'sandbox' ? undefined : 'sandbox' }))
+                    }
+                  >
+                    权限
+                  </button>
+                </div>
+                <div className="seat-summary">
+                  <span className="mono">{draft.ws.trim() || roleDefaultWs}</span>
+                  <span className="dot-sep">·</span>
+                  <span>{sandboxLabel}</span>
+                </div>
+
+                {panel === 'ws' ? (
+                  <div className="seat-panel">
+                    <div className="row" style={{ gap: 6 }}>
+                      <input
+                        value={draft.ws}
+                        placeholder={`相对任务工作区, 例如 ${roleDefaultWs}; 也可选绝对路径`}
+                        onChange={(e) =>
+                          setSeatDraft((prev) => ({ ...prev, [seat.id]: { ...draft, ws: e.target.value } }))
+                        }
+                      />
+                      <button type="button" className="btn sm" onClick={() => void pickSeatNative(seat.id)}>
+                        选择目录…
+                      </button>
+                      <button
+                        type="button"
+                        className="btn sm ghost"
+                        onClick={() => setSeatDraft((prev) => ({ ...prev, [seat.id]: { ...draft, ws: '' } }))}
+                      >
+                        用默认
+                      </button>
+                    </div>
+                    <div className="field-hint" style={{ marginTop: 6 }}>
+                      留空 = 自动分配 <code>{roleDefaultWs}</code>; 选绝对路径则该席位直接用那个目录(必须已存在, 且不在项目外时会被拒绝)。
+                    </div>
+                  </div>
+                ) : null}
+
+                {panel === 'sandbox' ? (
+                  <div className="seat-panel">
+                    <select
+                      value={draft.sandbox}
+                      onChange={(e) =>
+                        setSeatDraft((prev) => ({
+                          ...prev,
+                          [seat.id]: { ...draft, sandbox: e.target.value as '' | SandboxMode },
+                        }))
+                      }
+                    >
+                      <option value="">跟随角色默认({roleDefaultSandbox})</option>
+                      <option value="read-only">只读</option>
+                      <option value="workspace-write">工作区内可写</option>
+                      <option value="danger-full-access">完全权限</option>
+                    </select>
+                    <div className="field-hint" style={{ marginTop: 6 }}>
+                      由 harness 原生能力生效: Codex 用沙箱, Claude 用 permissionMode + 工具放行, DSH 只能靠提示词与事后审计。
+                    </div>
+                  </div>
+                ) : null}
               </div>
             );
           })}
@@ -259,6 +348,25 @@ export function NewTaskDialog({
           </button>
         </div>
       </div>
+      {pickingSeat ? (
+        <DirectoryPicker
+          title={`选择 ${
+            seatList.find((x) => x.id === pickingSeat)?.profile?.name ?? '席位'
+          } 的工作目录`}
+          initial={(() => {
+            const ws = (seatDraft[pickingSeat]?.ws ?? '').trim();
+            return /^[A-Za-z]:[\\/]/.test(ws) ? ws : null;
+          })()}
+          onClose={() => setPickingSeat(null)}
+          onPick={(abs) => {
+            setSeatDraft((prev) => ({
+              ...prev,
+              [pickingSeat]: { ...(prev[pickingSeat] ?? { ws: '', sandbox: '' }), ws: abs },
+            }));
+            setPickingSeat(null);
+          }}
+        />
+      ) : null}
       {pickingWorkspace ? (
         <DirectoryPicker
           title="选择任务工作区"

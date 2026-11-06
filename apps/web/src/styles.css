@@ -2784,6 +2784,49 @@ a.link:hover {
   padding: 6px 0;
   border-top: 1px dashed var(--line);
 }
+.seat-card {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  padding: 8px 10px;
+  margin-top: 8px;
+}
+.seat-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.seat-spacer {
+  flex: 1;
+}
+.seat-summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.seat-summary .mono {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.dot-sep {
+  color: var(--text-3);
+}
+.seat-panel {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--line);
+}
+.seat-panel input,
+.seat-panel select {
+  width: 100%;
+}
+
 .seat-row:first-of-type {
   border-top: none;
 }
