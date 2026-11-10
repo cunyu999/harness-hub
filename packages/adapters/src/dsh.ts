@@ -21,7 +21,8 @@ import {
   type TurnRequest,
 } from './types.js';
 import { newId, sha256Text } from '../../core/src/util.js';
-import { buildChildEnv, resolveLauncher, spawnHarness } from './exec.js';
+import { buildChildEnv, killProcessTree, resolveLauncher, spawnHarness } from './exec.js';
+import { openDiagLog, type DiagLog } from './diag.js';
 
 export interface DshAdapterOptions {
   /** dsh CLI 入口 (项目内 node_modules/@deepseek-ai/dsh/lib/bin.js) */
@@ -217,11 +218,7 @@ export class DshAdapter implements HarnessAdapter {
         warnings,
       };
     } finally {
-      try {
-        child.kill();
-      } catch {
-        /* ignore */
-      }
+      killProcessTree(child);
     }
   }
 
@@ -272,6 +269,8 @@ class DshSession implements AdapterSession {
   private observedModel: string | null = null;
   private observedReasoning: string | null = null;
   private detail = '已启动 dsh ACP 服务';
+  /** 本次 attempt 的原始 stderr, 仅用于事后诊断。 */
+  private readonly stderrLog: DiagLog | null;
   private readonly pendingApprovals = new Map<string, { nativeId: string | number; options: Record<string, unknown>[] }>();
   private toolNames = new Map<string, string>();
 
@@ -284,15 +283,18 @@ class DshSession implements AdapterSession {
   ) {
     this.child = child;
     this.localId = localId;
+    this.stderrLog = openDiagLog(this.opts.diagnosticsDir, 'stderr.log');
     this.rpc = new StdioRpc(child, {
       onNotification: (m, p) => this.onNotification(m, p),
       onRequest: (id, m, p) => this.onServerRequest(id, m, p),
       onStderr: (t) => {
+        this.stderrLog?.write(t);
         if (t.trim().length > 0 && /error|warn/i.test(t)) {
           this.emit({ kind: 'notice', text: t.trim().slice(0, 300) });
         }
       },
       onClose: (code) => {
+        this.stderrLog?.close();
         this.connection = 'disconnected';
         this.activity = 'unknown';
         this.detail = `dsh ACP 进程已退出 code=${code}`;
@@ -621,11 +623,7 @@ class DshSession implements AdapterSession {
       await new Promise((r) => setTimeout(r, 250));
     }
     this.expectedExit = true;
-    try {
-      this.child.kill();
-    } catch {
-      /* ignore */
-    }
+    killProcessTree(this.child);
     return { confirmed: false, detail: '未在 15s 内确认取消, 已终止进程', at };
   }
 
@@ -660,11 +658,8 @@ class DshSession implements AdapterSession {
         await this.rpc.call('session/close', { sessionId: this.nativeId }, 5000).catch(() => undefined);
       }
     } finally {
-      try {
-        this.child.kill();
-      } catch {
-        /* ignore */
-      }
+      killProcessTree(this.child);
+      this.stderrLog?.close();
     }
   }
 }

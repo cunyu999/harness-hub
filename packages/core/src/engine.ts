@@ -1,4 +1,4 @@
-/**
+﻿/**
  * 任务引擎: 把"模型判断"和"程序状态机"分开。
  * - 模型只负责生成计划、执行工作、审核结论(通过适配器);
  * - 引擎负责阶段转换、计划版本绑定、依赖与并发、重试上限、产物验证、
@@ -7,7 +7,7 @@
  */
 import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { mkdirSync, writeFileSync, readFileSync, existsSync, statSync, copyFileSync, rmSync, readdirSync } from 'node:fs';
+import { mkdirSync, writeFileSync, readFileSync, existsSync, statSync, copyFileSync, rmSync, readdirSync, appendFileSync } from 'node:fs';
 import path from 'node:path';
 import {
   DEFAULT_LIMITS,
@@ -43,6 +43,7 @@ import type {
   TurnOutcome,
 } from '../../adapters/src/types.js';
 import { extractJson } from '../../adapters/src/envelope.js';
+import { killProcessTree } from '../../adapters/src/exec.js';
 import { EventBus } from './bus.js';
 import { selectDispatchable, allTerminal, executionSettled, type DispatchItem } from './scheduler.js';
 import { addUsage, emptyUsage, normalizeUsage } from './usage.js';
@@ -106,6 +107,18 @@ export interface EngineConfig {
   defaultTurnTimeoutMs?: number;
   /** 一次任务里允许的最长回合数, 防止无限循环。 */
   maxTurnsPerTask?: number;
+  /**
+   * 程序自己的本地目录(工作区/归档/诊断日志的父目录)。
+   * 默认 `<root>/.local`; 便携版把数据放在 packages 目录之外时由宿主显式传入,
+   * 否则重装/重新打包程序目录会把用户的工作区和归档一起清掉。
+   */
+  localDir?: string;
+  /**
+   * 回合开始前的私有 home 同步钩子。
+   * core 不依赖具体 harness 的目录布局, 由宿主注入;
+   * 每次 runTurn 在 openSession 之前调用, 因此外部(如 cc-switch)改过的配置能在下一回合生效。
+   */
+  prepareHome?: (profile: ExecutionProfile) => void | Promise<void>;
 }
 
 interface LiveSession {
@@ -118,6 +131,8 @@ interface LiveSession {
   session: AdapterSession;
   cancelRequested: boolean;
   purpose: string;
+  /** 本次 attempt 的诊断目录; null 表示没建起来(磁盘或权限问题), 不影响回合。 */
+  diagDir: string | null;
 }
 
 interface DeltaBuffer {
@@ -148,6 +163,8 @@ export class Engine implements AdapterHost {
   private readonly pumping = new Set<string>();
   private readonly stageBusy = new Set<string>();
   private readonly deltas = new Map<string, DeltaBuffer>();
+  /** 各诊断目录已写入的字节数, 防止异常事件把磁盘刷满。 */
+  private readonly diagBytes = new Map<string, number>();
   private readonly workerPromises = new Map<string, Set<Promise<void>>>();
   private readonly noEventMarked = new Set<string>();
   private readonly startTs = Date.now();
@@ -156,6 +173,8 @@ export class Engine implements AdapterHost {
   private stopped = false;
   private readonly defaultTurnTimeoutMs: number;
   private readonly maxTurnsPerTask: number;
+  /** 工作区、归档、诊断日志的父目录; 数据目录可搬, 这里必须跟着走。 */
+  private readonly localDir: string;
 
   constructor(
     private readonly repo: Repo,
@@ -163,6 +182,7 @@ export class Engine implements AdapterHost {
   ) {
     this.defaultTurnTimeoutMs = cfg.defaultTurnTimeoutMs ?? 25 * 60_000;
     this.maxTurnsPerTask = cfg.maxTurnsPerTask ?? 200;
+    this.localDir = cfg.localDir ?? path.join(cfg.paths.root, '.local');
   }
 
   /* ------------------------------------------------------------------ */
@@ -200,7 +220,7 @@ export class Engine implements AdapterHost {
     let files = 0;
 
     if (keep && artifacts.length > 0) {
-      archivedDir = path.join(this.cfg.paths.root, '.local', 'archive', taskId);
+      archivedDir = path.join(this.localDir, 'archive', taskId);
       mkdirSync(archivedDir, { recursive: true });
       const kept: Array<{ path: string; size: number; sha256: string }> = [];
       for (const artifact of artifacts) {
@@ -254,7 +274,7 @@ export class Engine implements AdapterHost {
    * 只读取 manifest.json 与目录统计, 不解析工作区里的任何内容。
    */
   listArchives(): ArchiveEntry[] {
-    const root = path.join(this.cfg.paths.root, '.local', 'archive');
+    const root = path.join(this.localDir, 'archive');
     if (!existsSync(root)) return [];
     const out: ArchiveEntry[] = [];
     for (const name of readdirSync(root)) {
@@ -311,7 +331,7 @@ export class Engine implements AdapterHost {
     if (!/^[A-Za-z0-9_-]{1,80}$/.test(name)) {
       throw new EngineError('invalid_archive_id', `不是合法的归档标识: ${name}`, 400);
     }
-    const root = path.join(this.cfg.paths.root, '.local', 'archive');
+    const root = path.join(this.localDir, 'archive');
     const dir = path.join(root, name);
     if (!existsSync(dir) || !statSync(dir).isDirectory()) {
       throw new EngineError('archive_not_found', `归档不存在: ${name}`, 404);
@@ -392,7 +412,7 @@ export class Engine implements AdapterHost {
   }
 
   workspaceDir(taskId: string): string {
-    return path.join(this.cfg.paths.root, '.local', 'runs', taskId, 'workspace');
+    return path.join(this.localDir, 'runs', taskId, 'workspace');
   }
 
   /** 角色大工作区: planner(强模型组) / worker(执行者组)。 */
@@ -447,7 +467,7 @@ export class Engine implements AdapterHost {
   }
 
   taskTmpDir(taskId: string): string {
-    return path.join(this.cfg.paths.root, '.local', 'runs', taskId, 'tmp');
+    return path.join(this.localDir, 'runs', taskId, 'tmp');
   }
 
   private taskSessionEnv(taskId: string, extra: Record<string, string> = {}): Record<string, string> {
@@ -755,6 +775,7 @@ export class Engine implements AdapterHost {
   ): Promise<{ outcome: TurnOutcome; attempt: RunAttempt; sessionRow: ManagedSession }> {
     if (this.stopped) throw new EngineError('engine_stopped', '引擎已关闭, 不再启动新回合', 503);
     const profile = this.profileFor(participant);
+    await this.cfg.prepareHome?.(profile);
     const adapter = this.adapterFor(profile);
     const workspace = this.workspaceOf(task);
     mkdirSync(workspace, { recursive: true });
@@ -762,6 +783,29 @@ export class Engine implements AdapterHost {
     const attemptId = newId('att');
     const sessionRowId = newId('ses');
     const now = nowIso();
+    // 诊断目录与元数据: 失败后不用重跑, 直接看 .local/runs/{taskId}/{attemptId}/
+    const diagDir = this.openDiagDir(task.id, attemptId);
+    const diagMeta = {
+      taskId: task.id,
+      taskTitle: task.title,
+      attemptId,
+      sessionId: sessionRowId,
+      participantId: participant.id,
+      participantName: participant.displayName,
+      adapterId: profile.adapterId,
+      profileId: profile.id,
+      profileName: profile.name,
+      requestedModel: profile.requestedModel,
+      requestedReasoning: profile.requestedReasoning,
+      sandbox: participant.sandbox ?? profile.sandbox,
+      cwd: sessionCwd,
+      kind,
+      phase,
+      purpose: opts.purpose ?? kind,
+      workItemId: opts.workItemId ?? null,
+      startedAt: now,
+    };
+    this.writeDiagJson(diagDir, 'meta.json', diagMeta);
     const attempt: RunAttempt = {
       id: attemptId,
       taskId: task.id,
@@ -821,6 +865,7 @@ export class Engine implements AdapterHost {
           profile,
           taskId: task.id,
           attemptId,
+          diagnosticsDir: diagDir,
           participantId: participant.id,
           cwd: sessionCwd,
           purpose: opts.purpose ?? kind,
@@ -848,6 +893,7 @@ export class Engine implements AdapterHost {
         session,
         cancelRequested: false,
         purpose: opts.purpose ?? kind,
+        diagDir,
       };
       this.live.set(session.localId, live);
       this.repo.updateSession(sessionRowId, {
@@ -964,6 +1010,17 @@ export class Engine implements AdapterHost {
       };
     } finally {
       this.liveUsage.delete(attemptId);
+      if (diagDir) {
+        const row = this.repo.getAttempt(attemptId);
+        this.writeDiagJson(diagDir, 'meta.json', {
+          ...diagMeta,
+          endedAt: row?.endedAt ?? nowIso(),
+          status: row?.status ?? 'unknown',
+          errorClass: row?.errorClass ?? null,
+          errorMessage: row?.errorMessage ?? null,
+        });
+        this.diagBytes.delete(diagDir);
+      }
       if (session) {
         this.live.delete(session.localId);
         await session.close().catch(() => undefined);
@@ -1005,11 +1062,46 @@ export class Engine implements AdapterHost {
     });
   }
 
+  /** 每次 attempt 一个诊断目录: .local/runs/{taskId}/{attemptId}/。 */
+  private openDiagDir(taskId: string, attemptId: string): string | null {
+    try {
+      const dir = path.join(this.localDir, 'runs', taskId, attemptId);
+      mkdirSync(dir, { recursive: true });
+      return dir;
+    } catch {
+      return null;
+    }
+  }
+
+  private writeDiagJson(dir: string | null, name: string, value: unknown): void {
+    if (!dir) return;
+    try {
+      writeFileSync(path.join(dir, name), JSON.stringify(value, null, 2), 'utf8');
+    } catch {
+      /* 诊断落盘失败不影响回合 */
+    }
+  }
+
+  private appendDiagEvent(dir: string | null, ev: AdapterEvent, at: string): void {
+    if (!dir) return;
+    const written = this.diagBytes.get(dir) ?? 0;
+    if (written > 8 * 1024 * 1024) return;
+    const line = `${JSON.stringify({ at, ...ev })}\n`;
+    try {
+      appendFileSync(path.join(dir, 'events.jsonl'), line, 'utf8');
+      this.diagBytes.set(dir, written + Buffer.byteLength(line, 'utf8'));
+    } catch {
+      /* ignore */
+    }
+  }
+
   onEvent(localId: string, ev: AdapterEvent): void {
     const live = this.live.get(localId);
     if (!live) return;
     const now = nowIso();
     this.repo.updateSession(live.sessionRowId, { lastEventAt: now });
+    // 消息增量本身会进数据库, 不重复落盘; 其余事件按序留一份原始副本
+    if (ev.kind !== 'message.delta') this.appendDiagEvent(live.diagDir, ev, now);
     this.noEventMarked.delete(live.sessionRowId);
     const base = { taskId: live.taskId, sessionId: live.sessionRowId, attemptId: live.attemptId };
     switch (ev.kind) {
@@ -2124,11 +2216,8 @@ export class Engine implements AdapterHost {
         });
         let output = '';
         const timer = setTimeout(() => {
-          try {
-            child.kill();
-          } catch {
-            /* ignore */
-          }
+          // Windows 上 cmd.exe 还会拉起真正的程序, 只杀 cmd 会留下孙进程
+          killProcessTree(child);
         }, 120_000);
         child.stdout?.on('data', (b: Buffer) => {
           output += b.toString('utf8');

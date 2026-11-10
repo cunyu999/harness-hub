@@ -386,7 +386,10 @@ test.after(() => {
 });
 
 test('心跳: 空体 POST 不需要 Content-Type(否则页面心跳永远 415)', async () => {
-  const cfg = loadConfig({ root: process.cwd(), port: 0, host: '127.0.0.1' });
+  // 测试库落到项目内的一次性目录: 既不出工作目录, 也不在 .local/data 里留 hb-*.db 垃圾
+  const root = join(process.cwd(), '.local', 'tmp', `test-heartbeat-${process.pid}`);
+  rmSync(root, { recursive: true, force: true });
+  const cfg = loadConfig({ root, port: 0, host: '127.0.0.1' });
   const db = new Db(join(cfg.dataDir, `hb-${process.pid}.db`));
   const repo = new Repo(db);
   const engine = new Engine(repo, { paths: { root: cfg.root, dataDir: cfg.dataDir }, adapters: { mock: new MockAdapter() } });
@@ -421,5 +424,6 @@ test('心跳: 空体 POST 不需要 Content-Type(否则页面心跳永远 415)',
     await api.stop();
     await engine.shutdown();
     db.close();
+    rmSync(root, { recursive: true, force: true });
   }
 });

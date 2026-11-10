@@ -1,3 +1,69 @@
+## 2026-11-10 Windows 桌面版: Electron 壳 + 10 KB 启动器
+
+目标: 双击就是桌面程序, 不再借 Edge 窗口。约束是网络不通, 不能 `npm install electron`, 也不能引 .NET SDK。
+
+**离线拿到 Electron**: 本机 `%LOCALAPPDATA%\electron\Cache` 里有官方 `electron-v43.3.0-win32-x64.zip`; `pack-portable.mjs` 直接解压它, 把 `electron.exe` 改名成 `HarnessHubCore.exe`, 再把自己写的 `apps/desktop/main.js` 放进 `resources/app`。全过程不联网。
+
+**为什么中间要加一个启动器**: 这台机器上 Electron 从后台上下文启动会在 app ready 之前 `0xC0000145/0xC0000005` 退出, 换 42/43 版本、`--disable-gpu` 都一样; 加 `--no-sandbox` 才活。而用户双击 exe 传不了参数, 所以打包时用系统自带的 `csc.exe` 现编一个 10 KB 的 `launcher.cs` 成 `HarnessHub.exe`: 它 `SetErrorMode(0x0001|0x0002|0x8000)`(关硬错误弹窗, 整棵树继承)、清掉 `ELECTRON_RUN_AS_NODE`、设 `HH_ERROR_MODE=1`、带 `--no-sandbox` 拉起内核。
+
+**壳的行为** (`apps/desktop/main.js`): 先读 `data\runtime.json` 探活, 有旧后端就复用; 否则起包内 `node.exe` 跑后端(随机端口), 轮询到 `/api/health` 通再开 1440×900 窗口; 关窗时先查 `/api/runtime` 的 `activeSessions`, 有任务就弹原生确认框, 确认后 `win.destroy()` 跳过页面 `beforeunload`, 由后端 `close-intent` 优雅退出, 6s 不退才 taskkill 进程树。
+
+**踩到的两个真问题**
+- 桌面壳原来设了 `HH_EXIT_WITH_UI=0`, 结果 `close-intent` 被一起禁掉(`runtime-control.ts:84` 直接返回 disabled), 关窗只能硬杀 → 去掉该变量, 保持默认。
+- 后台启动的窗口会被系统按最小化创建(实测 rect 158×26 @ -21333,-21333), `ready-to-show` 里补一次 `restore()+focus()`。
+
+**验证**: 打包 **808.1 MB / 7750 文件**; WMI 启动后窗口正常(1441×901)、`/api/health` 200、库在 `data\harness-hub.db`、`data\` 顶层只有 electron/homes/logs/runs/数据库/runtime.json; WM_CLOSE 后 `窗口已销毁` → 2.5s 内 `server 退出 code=0`、`runtime.json` 删除、进程归零。`npm test` **72/72**。
+**未做**: 打 zip、代码签名、自动更新、托盘; 依赖 `--no-sandbox` 是这台机器的权宜之计。
+
+## 2026-11-09 Windows 便携版: D:\1hobby\HarnessHub
+
+目标是不装 Node 也能双击运行, 同时不碰开发目录与现有数据。做法是"复制运行时"而不是重写: 程序目录自带 `node.exe`, 后端与前端仍是同一份构建产物。
+
+**打包**
+- 新增 `scripts/pack-portable.mjs` + `npm run pack`: 构建 → 复制 `dist/`(去掉测试)、`apps/web/dist/`、`scripts/start.ps1`、`node.exe`(取当前解释器) → 用 `npm ls --omit=dev --all --parseable` 列出生产依赖并原样复制(不重新下载, 不联网) → 写启动器与说明。重打包只清程序文件, `data/` 保留。
+- 安装目录与数据分离: `HH_ROOT=<包目录>`, `HH_DATA_DIR=<包目录>\data`, `HH_PORT=0`(端口随机, 避免和开发实例的 4310 撞车)。
+
+**启动器**
+- `HarnessHub.vbs`: 先读 `data\runtime.json` 并探 `/api/health`, 服务还活着就直接开窗口; 否则用 `powershell -File scripts\start.ps1` 隐藏启动(ps1 会先关掉 Windows 硬错误弹窗), 轮询端口最多 30s, 再用 `msedge --app=...` 开一个无地址栏窗口; 没有 Edge 就退回默认浏览器。
+- `scripts/start.ps1` 改为优先用包内 `node.exe`(没有才用 PATH 里的 `node`), 因此不依赖用户装 Node; 该文件改存 UTF-8 BOM——之前无 BOM 的 UTF-8 会被 Windows PowerShell 按 ANSI 解码, 中文注释末尾的字节可能把换行吞掉, 导致下一行代码被并进注释。
+
+**端口与数据**
+- `apps/server/src/config.ts`: 设了 `HH_DATA_DIR` 时, `homes/runs/logs` 与数据库一起放在该目录下; 未设时仍是 `.local/`(开发行为不变)。
+- `apps/server/src/index.ts`: 监听成功后写 `data\runtime.json`(pid/host/port/url/root/dataDir/startedAt)并打印 `HH_READY <port>`; 关停时删掉该文件。重复启动的提示也改成读这个文件里的实际端口。
+
+**验证**
+- `npm test` **70/70**; `npm run build`、`typecheck:web` 通过。
+- 实测: 打包产物 460.8 MB / 7634 文件(SDK 的 vendor 占 343 MB); 后端在随机端口起、`/api/health` 通、静态页与 favicon 200、种子配置 3 条; 走真实 `HarnessHub.vbs` 双击路径拉起 Edge 应用窗口, close-intent 后进程退出、`runtime.json` 自动消失。
+- 未做的事: 没有打 zip、没有做安装器(Electron 壳与 NSIS 留作后续), 没在"干净机器"上试(仅在本机, 依赖本机已登录的 codex/claude/dsh)。
+
+**数据目录一致性(2026-11-10 补修)**
+- 私有 home 曾按 `root/.local/homes` 算路径, 而适配器读的是 `cfg.homesDir`: 便携版里同步写 `HarnessHub\.local\homes`, 实际进程却读 `HarnessHub\data\homes`, 两份目录永远对不上。`homes.ts` 的 `homeDirFor/preparePrivateHome/homeSyncStatus` 增加可选的 `homesRoot` 参数, 调用点统一传 `cfg.homesDir`。
+- engine 的 `runs/archive/诊断目录` 也曾硬编码 `paths.root/.local`: 重打包会清程序目录(只保留 `data/`), 用户的工作区与归档会被连带删掉。`EngineConfig` 新增 `localDir`, 宿主传 `cfg.localDir`; 未传时仍是 `<root>/.local`(测试与开发行为不变)。
+- `pack-portable.mjs` 复制 `dist/` 时排除 `.local` 残留——之前把仓库里测试临时目录一起打进包了。
+- 回归: `npm test` **72/72**; 重新打包 453.5 MB / 7608 文件; 对打包产物跑 `scripts/acceptance-api.mjs` 得 **53/53**, 工作区与归档落在 `data\runs`、`data\archive`, 私有 home 落在 `data\homes`。
+
+## 2026-11-09 进程树取消 · attempt 诊断 · 产物卫生 · 审批提醒
+
+起因是自查发现四个会慢性出血的问题: 取消后进程还在跑、失败现场只有一句 error、测试与临时文件把 `.local` 撑到 1.8GB、等审批只能盯屏。按"先止血再体检"的顺序处理。
+
+**进程树**
+- `packages/adapters/src/exec.ts` 新增 `killProcessTree()`: Windows 上 `taskkill /pid <pid> /T /F`, 再兜底 `child.kill()`; 非 Windows 直接 `child.kill()`。
+- 替换了所有只杀直接子进程的路径: `exec.ts` 重试、`codex.ts` 探针/中断兜底/`close()`、`dsh.ts` 同三处、`engine.ts` 验证命令的 120s 超时。
+
+**失败可诊断**
+- 新增 `packages/adapters/src/diag.ts`(`openDiagLog`, 4MB 封顶); `OpenSessionOptions` 增加 `diagnosticsDir`。
+- 引擎每个 attempt 落 `.local/runs/<taskId>/<attemptId>/`: `meta.json`(席位/模型/权限/cwd/阶段/起止/错误分类)、`events.jsonl`(除流式 delta 外全部事件)、适配器 `stderr.log`; 各自封顶, 中途写失败不影响回合。
+
+**产物卫生**
+- `tests/http.test.ts` 心跳用例改用 `.local/tmp/test-heartbeat-<pid>`, 结束即删, 不再往 `.local/data` 写 `hb-*.db`(历史残留 36 个已清)。
+- 新增 `scripts/doctor.mjs` + `npm run doctor`: 默认只读体检(data/homes/runs/tmp/archive/screenshots 的体积与文件数、测试库、孤儿 home、旧 attempt); `--clean` 清测试库/孤儿 mock home/14 天前 runs, `--tmp` 才清 7 天前 tmp。
+
+**审批提醒**
+- `apps/web/src/lib/notify.ts`: 标题徽标 `(N) Harness Hub`; 页面隐藏且已授权时弹桌面通知(点通知回到对应页签)。
+- 审批页签 `A` 批准 / `D` 拒绝第一条非输入请求, 输入框内不触发。
+
+验证: `npm test` **70/70**; `npm run typecheck`、`npm run typecheck:web`、`npm run build:web` 通过; 未跑真实 harness(live 脚本要额度, 留给用户决定)。
+
 ## 2026-11-06 全量回归: 64 单元 / 53 接口 / 27 界面 / 9 真实
 
 按"把你说过的每条要求都验一遍"做了一轮完整回归, 脚本都在 `scripts/` 下可复跑:
@@ -239,6 +305,22 @@ Windows 弹「位置不可用」。
     输出里的失败特征(FINDSTR 打不开、不是内部或外部命令、拒绝访问等), 命中即判失败并写清原因
     (单测 `tests/validation-noise.test.ts`);
 - 计划提示同步补了一条: `findstr` 必须写 `/c:"整串"`, 只写 `findstr "Hello, World!" file` 必然报错。
+
+## 私有 home 每回合择新同步(兼容 cc-switch)
+
+- 问题: 之前只在建任务/探针时把源 home 复制进 `.local/homes/`, 之后用户在 cc-switch 里切订阅/API 不再生效;
+  而且"有目标就覆盖"的 resync 会把 harness 在私有 home 里刷新过的令牌冲掉。
+- 现在: `runTurn` 在 `openSession` 前调用注入的 `prepareHome`, 逐文件判断:
+  - 源内容与上次同步记录不同(sha1 比对)→ 覆盖私有 home(cc-switch 切换生效);
+  - 源没变、私有 home 被 harness 刷新 → 保留私有版本, 不用旧源覆盖;
+  - 没有历史记录的老目录 → 按 mtime 保守处理;
+  - `configRefs.resync='true'` 仍表示"强制以源为准"。
+- 落点: `apps/server/src/homes.ts`(`syncFile` / `homeSyncStatus` / 私有 home 内 `.sync-state.json`)、
+  `packages/core/src/engine.ts:103`(`EngineConfig.prepareHome`)、`packages/core/src/engine.ts:757`(runTurn 调用)、
+  `apps/server/src/index.ts:147`(注入 `preparePrivateHome`)、`packages/contracts/src/api.ts`(`HomeSyncStatus`)。
+- 界面: 执行配置详情在"凭据来源目录"下显示上次检查/最近写入/来源是否有新改动/保留了哪些本地刷新文件。
+- 测试: 新增 `tests/home-sync.test.ts` 6 项(首次复制、幂等、源更新覆盖、私有更新保留、resync 强制、DSH 子目录), `npm test` **70/70**。
+- 边界: 模型仍以 `requestedModel` 为准(`profile_drift` 保护); 同步是文件级; 正在跑的回合不受影响, 下一回合生效。
 
 ## 进行中
 

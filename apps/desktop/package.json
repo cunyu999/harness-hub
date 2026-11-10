@@ -1,0 +1,7 @@
+{
+  "name": "harness-hub-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Harness Hub 桌面壳: 只负责开窗口与拉起本机后端",
+  "main": "main.js"
+}

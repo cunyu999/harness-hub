@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, type ProfileDto } from './api';
 import { useTask, useTaskList } from './store';
 import { CollabGraph, type GraphSelection } from './components/CollabGraph';
@@ -10,6 +10,7 @@ import { ArchivePanel, NewTaskDialog, ProfilesPanel } from './components/Dialogs
 import { LIFECYCLE_LABEL, LIFECYCLE_TONE, PHASES, PHASE_LABEL, clock, shortId, tokenParts, tokens } from './lib/format';
 import { useTheme } from './lib/theme';
 import { usePageLifecycle } from './lib/runtime';
+import { notificationState, notify, requestNotificationPermission, setTitleBadge, type NotifyState } from './lib/notify';
 
 type Tab = 'plan' | 'chat' | 'approvals' | 'review' | 'artifacts' | 'events';
 
@@ -132,6 +133,40 @@ export function App() {
   const detail = state.detail;
   const pendingCount = detail?.approvalsPending.length ?? 0;
 
+  const [notifyPerm, setNotifyPerm] = useState<NotifyState>(() => notificationState());
+  const awaitingPlan = detail?.task.lifecycle === 'awaiting_plan_approval';
+  const attention = pendingCount + (awaitingPlan ? 1 : 0);
+  const prevAttention = useRef<{ taskId: string | null; approvals: number; plan: boolean }>({
+    taskId: null,
+    approvals: 0,
+    plan: false,
+  });
+
+  // 标题徽标: 有待处理事项时显示数量
+  useEffect(() => {
+    setTitleBadge(attention);
+    return () => setTitleBadge(0);
+  }, [attention]);
+
+  // 只在"新出现"时通知一次; 切换任务、页面可见时都不打扰
+  useEffect(() => {
+    const prev = prevAttention.current;
+    const id = detail?.task.id ?? null;
+    const sameTask = prev.taskId === id;
+    if (detail && sameTask) {
+      if (pendingCount > prev.approvals) {
+        const first = detail.approvalsPending[0];
+        notify('有新的审批请求', first ? `${detail.task.title}: ${first.title}` : detail.task.title, () => {
+          setTab('approvals');
+        });
+      }
+      if (awaitingPlan && !prev.plan) {
+        notify('计划等待批准', detail.task.title, () => setTab('plan'));
+      }
+    }
+    prevAttention.current = { taskId: id, approvals: pendingCount, plan: awaitingPlan };
+  }, [detail, pendingCount, awaitingPlan]);
+
   const refresh = useCallback(() => {
     state.reload();
     reloadTasks();
@@ -175,7 +210,28 @@ export function App() {
           </div>
           <button
             className="icon-btn"
-            style={{ marginLeft: 'auto' }}
+            style={{ marginLeft: 'auto', marginRight: 2 }}
+            onClick={() => {
+              void requestNotificationPermission().then(setNotifyPerm);
+            }}
+            title={
+              notifyPerm === 'granted'
+                ? '桌面通知已开启: 页面在后台时, 审批或计划等待会弹系统通知'
+                : notifyPerm === 'denied'
+                  ? '浏览器已拒绝通知, 可在地址栏站点设置里恢复'
+                  : notifyPerm === 'unsupported'
+                    ? '当前环境不支持桌面通知, 仍会用标签页标题提示待处理数量'
+                    : '开启桌面通知: 审批或计划等待时提醒'
+            }
+            aria-label="桌面通知设置"
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill={notifyPerm === 'granted' ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M6 9a6 6 0 0 1 12 0c0 4 1.4 5.4 1.4 5.4H4.6S6 13 6 9Z" />
+              <path d="M10 18.4a2 2 0 0 0 4 0" />
+            </svg>
+          </button>
+          <button
+            className="icon-btn"
             onClick={toggleTheme}
             title={theme === 'dark' ? '切换到浅色主题' : '切换到深色主题'}
             aria-label={theme === 'dark' ? '切换到浅色主题' : '切换到深色主题'}

@@ -20,7 +20,8 @@ import {
   type TurnRequest,
 } from './types.js';
 import { newId, sha256Text } from '../../core/src/util.js';
-import { buildChildEnv, resolveLauncher, spawnHarness } from './exec.js';
+import { buildChildEnv, killProcessTree, resolveLauncher, spawnHarness } from './exec.js';
+import { openDiagLog, type DiagLog } from './diag.js';
 
 /**
  * 权限模式 → Codex 的审批策略。
@@ -195,11 +196,7 @@ export class CodexAdapter implements HarnessAdapter {
         warnings,
       };
     } finally {
-      try {
-        child.kill();
-      } catch {
-        /* ignore */
-      }
+      killProcessTree(child);
     }
   }
 
@@ -253,6 +250,8 @@ class CodexSession implements AdapterSession {
   private observedReasoning: string | null = null;
   private readonly pendingRequests = new Map<string, { nativeId: number | string; method: string; params: Record<string, unknown> }>();
   private detail = '已启动 codex app-server';
+  /** 本次 attempt 的原始 stderr, 仅用于事后诊断。 */
+  private readonly stderrLog: DiagLog | null;
 
   private constructor(
     private readonly opts: OpenSessionOptions,
@@ -263,15 +262,18 @@ class CodexSession implements AdapterSession {
   ) {
     this.child = child;
     this.localId = localId;
+    this.stderrLog = openDiagLog(this.opts.diagnosticsDir, 'stderr.log');
     this.rpc = new StdioRpc(child as never, {
       onNotification: (m, p) => this.onNotification(m, p),
       onRequest: (id, m, p) => this.onServerRequest(id, m, p),
       onStderr: (t) => {
+        this.stderrLog?.write(t);
         if (/ERROR/.test(t) && /sandbox|approval|permission/.test(t)) {
           this.emit({ kind: 'notice', text: t.trim().slice(0, 300) });
         }
       },
       onClose: (code) => {
+        this.stderrLog?.close();
         this.connection = 'disconnected';
         this.activity = 'unknown';
         this.detail = `codex app-server 已退出 code=${code}`;
@@ -628,11 +630,7 @@ class CodexSession implements AdapterSession {
     }
     // 无法确认时终止进程
     this.expectedExit = true;
-    try {
-      this.child.kill();
-    } catch {
-      /* ignore */
-    }
+    killProcessTree(this.child);
     return { confirmed: false, detail: '未在 15s 内确认中断, 已终止进程', at };
   }
 
@@ -671,11 +669,8 @@ class CodexSession implements AdapterSession {
         await this.rpc.call('thread/close', { threadId: this.nativeThreadId }, 5000).catch(() => undefined);
       }
     } finally {
-      try {
-        this.child.kill();
-      } catch {
-        /* ignore */
-      }
+      killProcessTree(this.child);
+      this.stderrLog?.close();
     }
   }
 }

@@ -28,5 +28,9 @@ if (-not (Test-Path $entry)) {
   exit 1
 }
 
-& node $entry @args
+# 便携包自带 node.exe: 优先用包内的, 不依赖用户 PATH 里的 node 版本.
+$node = Join-Path $root 'node.exe'
+if (-not (Test-Path $node)) { $node = 'node' }
+
+& $node $entry @args
 exit $LASTEXITCODE

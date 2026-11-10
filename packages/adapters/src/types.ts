@@ -89,6 +89,8 @@ export interface OpenSessionOptions {
   profile: ExecutionProfile;
   taskId: string;
   attemptId: string | null;
+  /** 本次 attempt 的诊断目录(项目内绝对路径), 适配器可把原始 stderr 落盘。 */
+  diagnosticsDir?: string | null;
   participantId: string | null;
   /** 任务工作目录(项目内绝对路径)。 */
   cwd: string;

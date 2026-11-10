@@ -3255,3 +3255,6 @@ table.grid tbody tr.rowclick:focus-visible { outline: 2px solid var(--accent); o
 .attempt-row { display: grid; grid-template-columns: minmax(88px, 190px) 84px minmax(0, 1fr); gap: 8px; align-items: baseline; font-size: 11px; padding: 4px 0; border-bottom: 1px solid var(--line); }
 .attempt-row > span { min-width: 0; overflow-wrap: anywhere; }
 .attempt-row:last-child { border-bottom: none; }
+
+/* 快捷键键帽 */
+.kbd { display: inline-block; min-width: 15px; padding: 0 4px; margin: 0 2px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; font-family: var(--mono); font-size: 10px; line-height: 15px; text-align: center; color: var(--text-1); }

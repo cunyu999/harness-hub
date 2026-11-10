@@ -3,7 +3,7 @@
  */
 
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { ClaudeAdapter } from '../../../packages/adapters/src/claude.js';
@@ -16,6 +16,7 @@ import { newId, nowIso } from '../../../packages/core/src/util.js';
 import { Db } from '../../../packages/storage/src/db.js';
 import { Repo } from '../../../packages/storage/src/repo.js';
 import { loadConfig, type AppConfig } from './config.js';
+import { preparePrivateHome } from './homes.js';
 import { ApiServer } from './http.js';
 import { UiWatchdog } from './runtime-control.js';
 
@@ -39,13 +40,14 @@ function seedProfiles(repo: Repo, cfg: AppConfig): void {
   const now = nowIso();
   const seeds = [
     {
-      name: 'Codex (gpt-6.1-sol)',
+      name: 'Codex',
       adapterId: 'codex' as const,
       executableRef: '',
       configRefs: { sourceHome: path.join(home, '.codex') },
-      requestedModel: 'gpt-6.1-sol',
-      requestedReasoning: 'medium',
-      notes: '首次运行自动探测生成。凭据从 ~/.codex 复制到项目内私有 home; 探针通过后再启用真实运行。',
+      requestedModel: null,
+      requestedReasoning: null,
+      notes:
+        '首次运行自动探测生成。凭据从 ~/.codex 复制到项目内私有 home; 模型留空表示沿用 ~/.codex/config.toml, cc-switch 切换订阅/api 后不用改这里。',
     },
     {
       name: 'Claude Code',
@@ -102,6 +104,16 @@ async function main(): Promise<void> {
   const db = new Db(cfg.dbPath); // 构造时自动迁移
   const repo = new Repo(db);
 
+  // 桌面壳/便携启动器靠这个文件找实际端口(HH_PORT=0 时端口是随机的, 不能靠猜)。
+  const runtimeFile = path.join(cfg.dataDir, 'runtime.json');
+  const readRuntimeFile = (): { port?: number } | null => {
+    try {
+      return JSON.parse(readFileSync(runtimeFile, 'utf8')) as { port?: number };
+    } catch {
+      return null;
+    }
+  };
+
   const nonce = newId('boot');
   if (!repo.acquireLease('server', process.pid, nonce, 20_000)) {
     // 上一进程崩溃后可能残留未到期的锁; 只有在原持有进程确实不存在时才接管。
@@ -117,9 +129,11 @@ async function main(): Promise<void> {
     }
     if (ownerAlive) {
       // 已经在跑: 这是重复启动, 不是错误。告诉用户去哪里访问即可。
+      // 端口可能是启动时临时分配的(HH_PORT=0), 所以优先读 runtime.json 里的实际值。
+      const live = readRuntimeFile();
       // eslint-disable-next-line no-console
       console.log(
-        `[harness-hub] 服务已在运行: http://${cfg.host}:${cfg.port} (pid=${held?.ownerPid ?? '?'}), 无需重复启动。`,
+        `[harness-hub] 服务已在运行: http://${cfg.host}:${live?.port ?? cfg.port} (pid=${held?.ownerPid ?? '?'}), 无需重复启动。`,
       );
       db.close();
       return;
@@ -146,7 +160,13 @@ async function main(): Promise<void> {
   const adapters = buildAdapters(cfg);
   const engine = new Engine(repo, {
     paths: { root: cfg.root, dataDir: cfg.dataDir },
+    // 工作区/归档/诊断日志跟数据目录走: 便携版把 data 放在程序目录里, 重打包只清程序文件。
+    localDir: cfg.localDir,
     adapters,
+    // 每回合开始前把私有 home 与源目录择新同步, 外部(cc-switch 等)改过的配置下一回合即可生效。
+    prepareHome: (profile) => {
+      preparePrivateHome(cfg.root, profile, cfg.homesDir);
+    },
   });
 
   seedProfiles(repo, cfg);
@@ -170,8 +190,36 @@ async function main(): Promise<void> {
   const api = new ApiServer(repo, engine, cfg, adapters, watchdog);
   await api.start();
 
+  // 把实际监听端口写给桌面壳/便携启动器: HH_PORT=0 时端口是运行时才定的, 它们不能靠猜。
+  const listenPort = api.listenAddress()?.port ?? cfg.port;
+  try {
+    mkdirSync(cfg.dataDir, { recursive: true });
+    writeFileSync(
+      runtimeFile,
+      JSON.stringify(
+        {
+          pid: process.pid,
+          host: cfg.host,
+          port: listenPort,
+          url: api.address(),
+          root: cfg.root,
+          dataDir: cfg.dataDir,
+          startedAt: new Date().toISOString(),
+        },
+        null,
+        2,
+      ),
+      'utf8',
+    );
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.warn(`[harness-hub] 写 runtime.json 失败: ${(err as Error).message}`);
+  }
+
   // eslint-disable-next-line no-console
   console.log(`[harness-hub] 服务已启动: ${api.address()}`);
+  // eslint-disable-next-line no-console
+  console.log(`[harness-hub] HH_READY ${listenPort}`);
   // eslint-disable-next-line no-console
   console.log(
     `[harness-hub] 数据库: ${cfg.dbPath}\n[harness-hub] 工作区根: ${path.join(cfg.runsDir, '<taskId>', 'workspace')}\n[harness-hub] 恢复: 中断尝试 ${recovery.interruptedAttempts}, 失效审批 ${recovery.expiredApprovals}, 暂停任务 ${recovery.pausedTasks}`,
@@ -204,6 +252,12 @@ async function main(): Promise<void> {
     }
     clearInterval(heartbeat);
     await api.stop();
+    // 端口文件是"正在运行"的标记: 关停后必须删掉, 否则下次启动器会去连一个死端口。
+    try {
+      rmSync(runtimeFile, { force: true });
+    } catch {
+      /* 删不掉也不影响关停 */
+    }
     repo.releaseLease('server', nonce);
     db.close();
     process.exit(0);

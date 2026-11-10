@@ -3,7 +3,7 @@
 在**本机**统一调度多个原生 AI 编码 harness(Codex、Claude Code、DeepSeek Harness, 可扩展 Hermes 等),
 由程序状态机负责计划版本、批准门槛、依赖与并发、审核规则、产物验证与故障恢复, 由模型负责规划判断与执行。
 
-- 技术栈: TypeScript + Node.js + React + SQLite(内置 `node:sqlite`), 本地网页 + 本机后端, 无 Electron。
+- 技术栈: TypeScript + Node.js + React + SQLite(内置 `node:sqlite`), 本地网页 + 本机后端; 另可打成 Windows 桌面版(Electron 壳, 可选)。
 - 只监听 `127.0.0.1`, 不做多用户、不做云端部署。
 - 全部文件(代码、依赖、日志、数据库、工作区、凭据副本)都在本目录内。
 
@@ -41,6 +41,16 @@ npm run dev:web                              # 前端 4311, 代理 /api 到 4310
 环境变量(可选): `HH_PORT`(默认 4310)、`HH_HOST`(默认 127.0.0.1)、`HH_ROOT`(默认本目录)、
 `HH_SEED_PROFILES=0` 关闭首次启动的示例执行配置。
 演练或测试时可用 `HH_DATA_DIR` / `HH_HOMES_DIR` / `HH_RUNS_DIR` 指向隔离目录, 避免污染正式库与工作区。
+
+### Windows 桌面版(可选)
+
+`npm run pack` 把构建产物、`node.exe`、生产依赖与一个 10 KB 启动器打到 `D:\1hobby\HarnessHub`(可用 `HH_PACK_DIR` 改),
+双击 `HarnessHub.exe` 就是 1440×900 的桌面窗口, 数据在 `HarnessHub\data`, 重打包只换程序文件、保留数据。
+
+- Electron 内核从本机 `%LOCALAPPDATA%\electron\Cache` 里的 win32-x64 zip 解压, 不联网; 也可用 `HH_ELECTRON_ZIP` 指定。
+- 启动器(`apps/desktop/launcher.cs`, 打包时用系统自带 `csc` 编译)负责 `--no-sandbox`、关硬错误弹窗、设 `HH_ERROR_MODE=1`;
+  直接双击 `HarnessHubCore.exe` 可能因沙箱初始化崩溃, 不要绕过启动器。
+- `npm run pack -- --no-electron` 只打 Edge 版(靠 `HarnessHub-Edge.vbs` 起浏览器窗口)。
 
 ### 关掉网页就停服务
 

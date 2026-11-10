@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { spawn, spawnSync, type ChildProcess, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 
@@ -23,6 +23,34 @@ export interface Launcher {
 }
 
 const WINDOWS = process.platform === 'win32';
+
+/**
+ * 结束 harness 进程及其全部后代。
+ *
+ * Windows 上 `child.kill()` 只结束直接子进程, 而 codex / dsh / claude 这类 harness 会再
+ * 拉起 node、python、MCP server 等子孙进程。只杀父进程会留下孤儿: 继续占端口、持有锁、
+ * 写日志, 下一次启动可能因此失败(也可能让用户看到残留窗口)。所以取消与超时统一走整树清理。
+ */
+export function killProcessTree(child: ChildProcess | ChildProcessWithoutNullStreams | null | undefined): void {
+  if (!child) return;
+  const pid = typeof child.pid === 'number' ? child.pid : null;
+  if (WINDOWS && pid !== null) {
+    try {
+      spawnSync('taskkill', ['/pid', String(pid), '/T', '/F'], {
+        windowsHide: true,
+        stdio: 'ignore',
+        timeout: 5000,
+      });
+    } catch {
+      /* taskkill 不可用时退回 child.kill() */
+    }
+  }
+  try {
+    child.kill();
+  } catch {
+    /* 进程可能已经退出 */
+  }
+}
 
 function isFile(p: string): boolean {
   try {
@@ -284,11 +312,7 @@ export function spawnHarness(
         if (settled) return;
         settled = true;
         cleanup();
-        try {
-          child.kill();
-        } catch {
-          /* 进程可能已经没了 */
-        }
+        killProcessTree(child);
         if (index < retries) {
           // 用最小可信环境重试: 排除"环境块被污染导致加载器失败"这一类原因
           void attempt(index + 1, minimalEnv(options.env)).then(resolvePromise, rejectPromise);

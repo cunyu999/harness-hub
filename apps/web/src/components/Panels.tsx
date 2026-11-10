@@ -11,6 +11,7 @@ export function ApprovalPanel({ detail, onChanged }: { detail: TaskDetail; onCha
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const pending = detail.approvalsPending;
+  const firstDecidable = pending.find((a) => a.kind !== 'user_input');
 
   const resolve = async (id: string, decision: 'approve' | 'deny' | 'cancel' | 'answer') => {
     setBusy(id);
@@ -25,10 +26,28 @@ export function ApprovalPanel({ detail, onChanged }: { detail: TaskDetail; onCha
     }
   };
 
+  // 快捷键只作用于第一条"批/拒"请求; 焦点在输入框里时完全不拦截
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.ctrlKey || e.metaKey || e.altKey) return;
+      const el = e.target as HTMLElement | null;
+      const tag = el?.tagName ?? '';
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el?.isContentEditable) return;
+      if (!firstDecidable || busy) return;
+      const key = e.key.toLowerCase();
+      if (key !== 'a' && key !== 'd') return;
+      e.preventDefault();
+      void resolve(firstDecidable.id, key === 'a' ? 'approve' : 'deny');
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  });
+
   return (
     <div className="stack">
       <div className="small muted">
         审批请求直接来自原生 harness 的审批事件; 程序不会替你选择。会话已结束时请求会标记为过期。
+        快捷键 <span className="kbd">A</span> 批准 / <span className="kbd">D</span> 拒绝第一条非输入请求; 输入框内不触发。
       </div>
       {pending.length === 0 ? <div className="empty">当前没有待处理的审批或输入请求。</div> : null}
       {pending.map((a) => (

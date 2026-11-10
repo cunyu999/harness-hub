@@ -81,6 +81,21 @@ export interface ProfileDto extends ExecutionProfile {
   lastProbe: ProbeResultDto | null;
   /** 被多少个任务参与者引用过(只读, 决定能否物理删除)。 */
   usage?: number;
+  /** 私有 home 与源目录的同步状态(只读, 用于确认外部配置是否已生效)。 */
+  homeSync?: HomeSyncStatus | null;
+}
+
+export interface HomeSyncStatus {
+  dir: string;
+  sourceHome: string | null;
+  /** 最近一次同步检查的时间。 */
+  checkedAt: string | null;
+  /** 最近一次真正写入私有 home 的时间。 */
+  updatedAt: string | null;
+  /** 源目录内容与上次同步不同, 下一回合会被同步进私有 home。 */
+  pendingSourceChange: boolean;
+  /** 内容有差异但保留了私有版本的文件名(通常是 harness 刷新过的凭据)。 */
+  keptPrivate: string[];
 }
 
 export interface ProbeResultDto {

@@ -35,7 +35,7 @@ import type { Repo } from '../../../packages/storage/src/repo.js';
 import type { HarnessAdapter } from '../../../packages/adapters/src/types.js';
 import type { AppConfig } from './config.js';
 import { guessMediaType, listDirectory, pickDirectoryNative } from './fs.js';
-import { preparePrivateHome } from './homes.js';
+import { homeSyncStatus, preparePrivateHome } from './homes.js';
 import type { RuntimeControl } from './runtime-control.js';
 
 const HANDLED = Symbol('handled');
@@ -394,6 +394,7 @@ export class ApiServer {
         ...p,
         usage: this.repo.countParticipantsForProfile(p.id),
         lastProbe: this.repo.getLastProbe(p.id) as ProfileDto['lastProbe'],
+        homeSync: homeSyncStatus(this.cfg.root, p, this.cfg.homesDir),
       }));
   }
 
@@ -468,7 +469,7 @@ export class ApiServer {
     if (!profile) throw new EngineError('profile_not_found', '执行配置不存在', 404);
     const adapter = this.adapters[profile.adapterId];
     if (!adapter) throw new EngineError('adapter_missing', `未注册适配器 ${profile.adapterId}`);
-    const home = preparePrivateHome(this.cfg.root, profile);
+    const home = preparePrivateHome(this.cfg.root, profile, this.cfg.homesDir);
     const result = await adapter.probe(profile, input.mode);
     this.repo.setLastProbe(profile.id, result);
     const capability = (result as { capability?: unknown }).capability;
@@ -509,7 +510,7 @@ export class ApiServer {
     }
     for (const profileId of [...input.strongProfileIds, ...input.workerProfileIds]) {
       const p = this.repo.getProfile(profileId);
-      if (p) preparePrivateHome(this.cfg.root, p);
+      if (p) preparePrivateHome(this.cfg.root, p, this.cfg.homesDir);
     }
     const task = this.engine.createTask({
       title: input.title,

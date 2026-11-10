@@ -739,7 +739,7 @@ export function ProfilesPanel({
                     />
                   </div>
                   <div className="field pf-span">
-                    <label>凭据来源目录(首次使用时只复制到项目内私有 home, 不移动)</label>
+                    <label>凭据来源目录(每回合择新同步到项目内私有 home, 不移动源文件)</label>
                     <input
                       className="mono"
                       type="text"
@@ -747,6 +747,26 @@ export function ProfilesPanel({
                       onChange={(e) => setDraft({ ...draft, sourceHome: e.target.value })}
                       placeholder={homeHint(draft.adapterId)}
                     />
+                    {current?.homeSync ? (
+                      <div className="field-hint">
+                        {[
+                          current.homeSync.checkedAt
+                            ? `上次检查 ${stamp(current.homeSync.checkedAt)}`
+                            : '尚未同步',
+                          current.homeSync.updatedAt
+                            ? `最近写入 ${stamp(current.homeSync.updatedAt)}`
+                            : null,
+                          current.homeSync.pendingSourceChange
+                            ? '来源有新改动, 下一回合自动生效'
+                            : '来源与私有 home 一致',
+                          current.homeSync.keptPrivate.length
+                            ? `保留本地刷新: ${current.homeSync.keptPrivate.join(', ')}`
+                            : null,
+                        ]
+                          .filter(Boolean)
+                          .join(' · ')}
+                      </div>
+                    ) : null}
                   </div>
                   <div className="field">
                     <label>模型(留空 = 用 harness 自己的配置)</label>

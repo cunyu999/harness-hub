@@ -61,3 +61,25 @@ test('归档: 非法标识与路径穿越都被拒绝', () => {
   );
   db.close();
 });
+
+test('本地目录外置(localDir)时工作区与归档跟着数据目录走', () => {
+  const root = join(process.cwd(), '.local', 'tmp', `archive-test-${process.pid}-extern`);
+  const localDir = join(root, 'data');
+  mkdirSync(localDir, { recursive: true });
+  const db = new Db(join(localDir, 'test.db'));
+  const repo = new Repo(db);
+  const engine = new Engine(repo, {
+    paths: { root, dataDir: localDir },
+    localDir,
+    adapters: { mock: new MockAdapter() },
+  });
+
+  assert.equal(engine.workspaceDir('task_x'), join(localDir, 'runs', 'task_x', 'workspace'));
+
+  const dir = join(localDir, 'archive', 'task_ext1');
+  mkdirSync(join(dir, 'deliverables'), { recursive: true });
+  writeFileSync(join(dir, 'manifest.json'), JSON.stringify({ taskId: 'task_ext1', title: '外置' }), 'utf8');
+  assert.equal(engine.listArchives().find((e) => e.taskId === 'task_ext1')?.title, '外置');
+  assert.equal(existsSync(join(root, '.local', 'archive')), false, '不应再往程序目录的 .local 写归档');
+  db.close();
+});
