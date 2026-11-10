@@ -484,6 +484,10 @@ export function ProfilesPanel({
   const [notice, setNotice] = useState<{ tone: 'ok' | 'bad' | 'muted'; text: string } | null>(null);
   /** 本机安装探测结果, 按适配器缓存(互不影响); 只在命中时显示一个可点的内联提示。 */
   const [detected, setDetected] = useState<Record<string, DetectResultDto>>({});
+  /** 用户点了 ✗ 的路径: 同一条结果不再重复提示。 */
+  const [dismissed, setDismissed] = useState<Record<string, string>>({});
+  const [detecting, setDetecting] = useState(false);
+  const [scanning, setScanning] = useState(false);
 
   useEffect(() => {
     void api
@@ -544,6 +548,15 @@ export function ProfilesPanel({
   const current = profiles.find((p) => p.id === selected) ?? null;
   /** 当前适配器在本机的探测结果; 只用来决定要不要显示「是否使用」。 */
   const detectedHit = draft ? (detected[draft.adapterId] ?? null) : null;
+  /** 提示条的显示条件: 命中、有路径、用户还没填过同一条、也没点过 ✗。 */
+  const detectHitVisible = Boolean(
+    detectedHit &&
+      detectedHit.found &&
+      detectedHit.executableRef &&
+      draft &&
+      draft.executableRef.trim() !== detectedHit.executableRef &&
+      dismissed[detectedHit.adapterId] !== detectedHit.executableRef,
+  );
 
   const pick = (p: ProfileDto) => {
     setSelected(p.id);
@@ -582,6 +595,67 @@ export function ProfilesPanel({
         : prev,
     );
     setNotice({ tone: 'muted', text: `已填入检测到的 ${hit.displayName} 路径, 保存后生效` });
+  };
+
+  /** ✗: 同一条结果不再提示, 直到主动重新检测或换了可执行入口。 */
+  const dismissDetected = () => {
+    if (!detectedHit) return;
+    const key = detectedHit.adapterId;
+    const path = detectedHit.executableRef ?? '';
+    setDismissed((prev) => ({ ...prev, [key]: path }));
+  };
+
+  /** 主动检测: 绕过 30 秒缓存再跑一次。 */
+  const redetect = async () => {
+    const adapterId = draft?.adapterId;
+    if (!adapterId) return;
+    setDetecting(true);
+    try {
+      const hit = await api.detectHarness(adapterId, true);
+      setDetected((prev) => ({ ...prev, [adapterId]: hit }));
+      setDismissed((prev) => {
+        const next = { ...prev };
+        delete next[adapterId];
+        return next;
+      });
+      const label = `${hit.displayName}${hit.version ? ` ${hit.version}` : ''}`;
+      setNotice(
+        hit.found
+          ? { tone: 'muted', text: `本机检测到 ${label}` }
+          : { tone: 'muted', text: `没有在本机找到 ${hit.displayName}, 可以试试「指定文件夹检索」` },
+      );
+    } catch (e) {
+      setNotice({ tone: 'bad', text: `检测失败: ${e instanceof Error ? e.message : String(e)}` });
+    } finally {
+      setDetecting(false);
+    }
+  };
+
+  /** 强力检索: 让用户选一个文件夹, 只在这个文件夹里找可执行文件。 */
+  const scanFolder = async () => {
+    const adapterId = draft?.adapterId;
+    if (!adapterId) return;
+    setScanning(true);
+    try {
+      const picked = await api.pickDirectory(null);
+      if (!picked.path) return;
+      const hit = await api.scanHarness(adapterId, picked.path);
+      setDetected((prev) => ({ ...prev, [adapterId]: hit }));
+      setDismissed((prev) => {
+        const next = { ...prev };
+        delete next[adapterId];
+        return next;
+      });
+      setNotice(
+        hit.found
+          ? { tone: 'muted', text: `在 ${picked.path} 里找到 ${hit.displayName}` }
+          : { tone: 'muted', text: `在 ${picked.path} 里没有找到 ${hit.displayName}` },
+      );
+    } catch (e) {
+      setNotice({ tone: 'bad', text: `检索失败: ${e instanceof Error ? e.message : String(e)}` });
+    } finally {
+      setScanning(false);
+    }
   };
 
   const save = async () => {
@@ -787,13 +861,39 @@ export function ProfilesPanel({
                       onChange={(e) => setDraft({ ...draft, executableRef: e.target.value })}
                       placeholder={execHint(draft.adapterId)}
                     />
-                    {detectedHit && detectedHit.found && detectedHit.executableRef && draft.executableRef.trim() !== detectedHit.executableRef ? (
-                      <button type="button" className="pf-detect" onClick={() => applyDetected(detectedHit)}>
-                        <span className="pf-detect-dot" aria-hidden="true" />
-                        已检测到{' '}
-                        {detectedHit.version ? `${detectedHit.displayName} ${detectedHit.version}` : detectedHit.displayName}
-                        , 是否使用?
+                    <div className="pf-actions">
+                      <button type="button" className="pf-mini" onClick={() => void redetect()} disabled={detecting}>
+                        {detecting ? '检测中…' : '检测本机'}
                       </button>
+                      <button type="button" className="pf-mini" onClick={() => void scanFolder()} disabled={scanning}>
+                        {scanning ? '检索中…' : '指定文件夹检索…'}
+                      </button>
+                    </div>
+                    {detectHitVisible && detectedHit ? (
+                      <div className="pf-detect" role="status">
+                        <span className="pf-detect-text">
+                          检测到 {detectedHit.displayName}
+                          {detectedHit.version ? ` ${detectedHit.version}` : ''}
+                        </span>
+                        <button
+                          type="button"
+                          className="pf-detect-yes"
+                          title={`使用 ${detectedHit.executableRef}`}
+                          aria-label="使用检测到的路径"
+                          onClick={() => applyDetected(detectedHit)}
+                        >
+                          ✓
+                        </button>
+                        <button
+                          type="button"
+                          className="pf-detect-no"
+                          title="不用这个"
+                          aria-label="忽略这条检测结果"
+                          onClick={dismissDetected}
+                        >
+                          ✗
+                        </button>
+                      </div>
                     ) : null}
                   </div>
                   <div className="field pf-span">

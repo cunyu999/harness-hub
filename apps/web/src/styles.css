@@ -3259,8 +3259,16 @@ table.grid tbody tr.rowclick:focus-visible { outline: 2px solid var(--accent); o
 /* 快捷键键帽 */
 .kbd { display: inline-block; min-width: 15px; padding: 0 4px; margin: 0 2px; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; font-family: var(--mono); font-size: 10px; line-height: 15px; text-align: center; color: var(--text-1); }
 
-/* 「执行配置」里的本机安装探测: 命中才出现, 点一下回填路径。 */
-.pf-detect { align-self: flex-start; display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border: 1px dashed var(--accent-line); border-radius: 999px; background: var(--accent-soft); color: var(--text); font: inherit; font-size: 12px; cursor: pointer; }
-.pf-detect:hover { border-color: var(--accent); background: rgba(139, 123, 255, 0.22); }
-.pf-detect:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.pf-detect-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent-2); }
+/* 「执行配置」里的本机安装探测: 命中才出现; 由右侧的 ✓ / ✗ 决定用不用, 选完即消失。 */
+.pf-detect { align-self: flex-start; display: inline-flex; align-items: center; gap: 2px; margin-top: 6px; padding: 2px 3px 2px 8px; border: 1px solid var(--accent-line); border-radius: 8px; background: var(--accent-soft); color: var(--text); font-size: 12px; }
+.pf-detect-text { white-space: nowrap; padding-right: 2px; }
+.pf-detect-yes, .pf-detect-no { width: 20px; height: 20px; display: inline-flex; align-items: center; justify-content: center; padding: 0; border: 1px solid transparent; border-radius: 5px; background: transparent; font-size: 12px; line-height: 1; cursor: pointer; }
+.pf-detect-yes { color: var(--ok); }
+.pf-detect-yes:hover { border-color: var(--ok-line); background: var(--ok-soft); }
+.pf-detect-no { color: var(--text-3); }
+.pf-detect-no:hover { color: var(--bad); border-color: var(--bad-line); background: var(--bad-soft); }
+.pf-detect-yes:focus-visible, .pf-detect-no:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.pf-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
+.pf-mini { padding: 3px 9px; border: 1px solid var(--line-2); border-radius: 6px; background: transparent; color: var(--text-2); font-size: 12px; cursor: pointer; }
+.pf-mini:hover:not(:disabled) { color: var(--text); border-color: var(--accent-line); }
+.pf-mini:disabled { opacity: 0.6; cursor: default; }

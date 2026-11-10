@@ -24,6 +24,7 @@ import {
   TaskControlSchema,
   TaskMessageSchema,
   type ArtifactDto,
+  type DetectResultDto,
   type ProfileDto,
   type SessionDto,
   type TaskListItem,
@@ -35,7 +36,7 @@ import type { Repo } from '../../../packages/storage/src/repo.js';
 import type { HarnessAdapter } from '../../../packages/adapters/src/types.js';
 import type { AdapterId } from '../../../packages/contracts/src/types.js';
 import type { AppConfig } from './config.js';
-import { detectHarness } from './detect.js';
+import { detectHarness, scanHarness } from './detect.js';
 import { guessMediaType, listDirectory, pickDirectoryNative } from './fs.js';
 import { homeSyncStatus, preparePrivateHome } from './homes.js';
 import type { RuntimeControl } from './runtime-control.js';
@@ -111,6 +112,7 @@ export class ApiServer {
     this.add('POST', '/api/profiles/:id/probe', (ctx) => this.probeProfile(ctx));
     this.add('GET', '/api/adapters', () => this.listAdapters());
     this.add('GET', '/api/detect/:adapterId', (ctx) => this.detectAdapter(ctx));
+    this.add('POST', '/api/detect/:adapterId/scan', (ctx) => this.scanAdapter(ctx));
 
     // 网页里的"选择工作区": 只读列目录
     this.add('GET', '/api/fs/list', (ctx) => this.listFs(ctx));
@@ -392,7 +394,15 @@ export class ApiServer {
 
   /** 只读探测本机是否装了某个 harness; 前端在配置表单里据此显示内联的「是否使用」。 */
   private detectAdapter(ctx: Ctx) {
-    return detectHarness(ctx.params.adapterId as AdapterId, this.cfg.root, this.cfg.localDir);
+    const force = ctx.url.searchParams.get('force') === '1';
+    return detectHarness(ctx.params.adapterId as AdapterId, this.cfg.root, this.cfg.localDir, force);
+  }
+
+  /** 「强力检索」: 只在用户指定的文件夹里找。 */
+  private scanAdapter(ctx: Ctx): DetectResultDto {
+    const dir = typeof (ctx.body as { dir?: unknown })?.dir === 'string' ? (ctx.body as { dir: string }).dir : '';
+    if (!dir.trim()) throw new EngineError('bad_request', '缺少要检索的文件夹路径', 400);
+    return scanHarness(ctx.params.adapterId as AdapterId, dir, this.cfg.root, this.cfg.localDir);
   }
 
   private listProfiles(): ProfileDto[] {

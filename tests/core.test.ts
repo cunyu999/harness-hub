@@ -1,6 +1,6 @@
-import { test } from 'node:test';
+import { after, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -10,6 +10,7 @@ import { selectDispatchable, executionSettled } from '../packages/core/src/sched
 import { DEFAULT_LIMITS, type Participant, type TaskRecord, type WorkItemState } from '../packages/contracts/src/types.js';
 
 const root = mkdtempSync(join(tmpdir(), 'hh-test-'));
+after(() => rmSync(root, { recursive: true, force: true }));
 
 function task(over: Partial<TaskRecord> = {}): TaskRecord {
   return {

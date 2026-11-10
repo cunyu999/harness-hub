@@ -171,8 +171,10 @@ export const api = {
   probeProfile: (id: string, mode: 'inspect' | 'live') =>
     request<ProbeResponse>('POST', `/api/profiles/${id}/probe`, { mode }),
   /** 探测本机是否装了某个 harness(只读, 不建立会话)。 */
-  detectHarness: (adapterId: string) =>
-    request<DetectResultDto>('GET', `/api/detect/${encodeURIComponent(adapterId)}`),
+  detectHarness: (adapterId: string, force = false) =>
+    request<DetectResultDto>('GET', `/api/detect/${encodeURIComponent(adapterId)}${force ? '?force=1' : ''}`),
+  scanHarness: (adapterId: string, dir: string) =>
+    request<DetectResultDto>('POST', `/api/detect/${encodeURIComponent(adapterId)}/scan`, { dir }),
   capabilities: () => request<{ id: string; displayName: string; mock: boolean }[]>('GET', '/api/adapters'),
   /** 页面存活心跳: 服务靠它判断网页还在不在。 */
   heartbeat: () => request<UiRuntimeStatus>('POST', '/api/runtime/heartbeat', {}),

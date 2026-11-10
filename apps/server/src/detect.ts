@@ -12,7 +12,8 @@
  * codex 的 `--version` 会在 home 下建 `tmp/arg0-*` 临时目录, 不隔离就会写到用户主目录。
  */
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, statSync } from 'node:fs';
+import type { Dirent } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { resolveLauncher, whichSync } from '../../../packages/adapters/src/exec.js';
@@ -44,7 +45,12 @@ const HARNESSES: Partial<Record<AdapterId, HarnessSpec>> = {
 const CACHE_TTL_MS = 30_000;
 const cache = new Map<string, { at: number; result: DetectResultDto }>();
 
-export function detectHarness(adapterId: AdapterId, root: string, localDir?: string): DetectResultDto {
+export function detectHarness(
+  adapterId: AdapterId,
+  root: string,
+  localDir?: string,
+  force = false,
+): DetectResultDto {
   const spec = HARNESSES[adapterId];
   const checkedAt = new Date().toISOString();
   if (!spec) {
@@ -53,7 +59,7 @@ export function detectHarness(adapterId: AdapterId, root: string, localDir?: str
 
   const cacheKey = `${adapterId}\u0000${root}\u0000${localDir ?? ''}`;
   const cached = cache.get(cacheKey);
-  if (cached && Date.now() - cached.at < CACHE_TTL_MS) return cached.result;
+  if (!force && cached && Date.now() - cached.at < CACHE_TTL_MS) return cached.result;
 
   const candidates = findCandidates(spec.command, root);
   const chosen = candidates[0] ?? null;
@@ -72,7 +78,82 @@ export function detectHarness(adapterId: AdapterId, root: string, localDir?: str
   return result;
 }
 
-/** 版本探测用的环境: 把 harness home 指到数据目录内, 避免在用户主目录留临时文件。 */
+/**
+ * 「强力检索」: 只在用户指定的文件夹里找。会做一次浅层 BFS(最多 10 层 / 3 万项),
+ * 优先 `命令.cmd` / `.exe` / `.ps1`, 其次是裸文件名, 跳过 `.git`。
+ */
+export function scanHarness(
+  adapterId: AdapterId,
+  dir: string,
+  root: string,
+  localDir?: string,
+): DetectResultDto {
+  const spec = HARNESSES[adapterId];
+  const checkedAt = new Date().toISOString();
+  if (!spec) return emptyResult(adapterId, checkedAt, `未知适配器: ${adapterId}`);
+
+  const target = path.resolve(dir);
+  let isDir = false;
+  try {
+    isDir = statSync(target).isDirectory();
+  } catch {
+    isDir = false;
+  }
+  if (!isDir) {
+    return { ...emptyResult(adapterId, checkedAt, `目录不存在: ${target}`), displayName: spec.displayName };
+  }
+
+  const hit = walkForCommand(target, spec.command);
+  const sourceHome = path.join(os.homedir(), spec.homeDirName);
+  return {
+    adapterId,
+    displayName: spec.displayName,
+    found: hit !== null,
+    executableRef: hit,
+    version: hit ? readVersion(hit, probeEnv(spec, root, localDir)) : null,
+    sourceHome: existsSync(sourceHome) ? sourceHome : null,
+    source: hit ? 'manual' : null,
+    checkedAt,
+    detail: hit ? `在所选文件夹里找到 ${path.basename(hit)}` : `在所选文件夹里没有找到 ${spec.command}`,
+  };
+}
+
+const SCAN_MAX_DEPTH = 10;
+const SCAN_MAX_ENTRIES = 30_000;
+const SKIP_DIRS = new Set(['.git']);
+
+function walkForCommand(root: string, command: string): string | null {
+  const names = [`${command}.cmd`, `${command}.exe`, `${command}.ps1`, command].map((n) => n.toLowerCase());
+  const queue: { dir: string; depth: number }[] = [{ dir: root, depth: 0 }];
+  let seen = 0;
+  while (queue.length > 0 && seen < SCAN_MAX_ENTRIES) {
+    const { dir, depth } = queue.shift() as { dir: string; depth: number };
+    let entries: Dirent[];
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    const files = new Map<string, string>();
+    for (const e of entries) {
+      seen += 1;
+      const full = path.join(dir, e.name);
+      if (e.isDirectory()) {
+        if (depth < SCAN_MAX_DEPTH && !SKIP_DIRS.has(e.name.toLowerCase())) {
+          queue.push({ dir: full, depth: depth + 1 });
+        }
+      } else if (e.isFile()) {
+        files.set(e.name.toLowerCase(), full);
+      }
+    }
+    for (const name of names) {
+      const found = files.get(name);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
 function probeEnv(spec: HarnessSpec, root: string, localDir?: string): NodeJS.ProcessEnv {
   const base = localDir ?? path.join(root, '.local');
   const home = path.join(base, 'tmp', 'detect', spec.homeEnv.toLowerCase());

@@ -97,8 +97,8 @@ export interface DetectResultDto {
   version: string | null;
   /** 检测到的默认凭据来源目录(存在才给)。 */
   sourceHome: string | null;
-  /** 从哪儿找到的: PATH / 项目内工具目录 / npm 全局目录。 */
-  source: 'path' | 'project' | 'npm' | null;
+  /** 从哪儿找到的: PATH / 项目内工具目录 / npm 全局目录 / 用户指定文件夹。 */
+  source: 'path' | 'project' | 'npm' | 'manual' | null;
   checkedAt: string;
   detail?: string;
 }

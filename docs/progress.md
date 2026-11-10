@@ -13,6 +13,12 @@
 - 界面点击验证(headless Edge + CDP): 打开「执行配置」后, Codex / Claude Code / DeepSeek Harness 三份配置分别出现 `已检测到 Codex 0.166.0, 是否使用?`、`已检测到 Claude Code 2.1.318, 是否使用?`、`已检测到 DeepSeek Harness 0.2.1-rc.5, 是否使用?`; 逐个点击后输入框分别变为 `E:\nodejs\node_global\codex.cmd`、`claude.cmd`、`.local\tools\node_modules\.bin\dsh.cmd`, chip 随即消失, 互不影响。
 - 打包版复测: WMI 启动 `HarnessHub.exe` 后 `GET /api/detect/codex` 返回 found/0.166.0; 临时探针目录落在 `data\tmp\detect\codex_home`, 用户主目录与 `~/.codex/tmp` 没有新增; 关窗 exit 0。
 
+**追加: 实线小条 + ✓/✗ + 主动检测 + 指定文件夹检索(2026-11-10)**
+- 提示条改成实线 1px、8px 圆角、12px 字号的紧凑条, 文案缩短为「检测到 Codex 0.166.0」; 右侧两个 20×20 小按钮 ✓ / ✗, 不再整条可点。✓ 回填并消失; ✗ 记进 `dismissed`(同一路径不再提示, 重新检测或换路径才恢复)。样式在 `apps/web/src/styles.css` 的 `.pf-detect` / `.pf-detect-yes` / `.pf-detect-no` / `.pf-actions` / `.pf-mini`。
+- 输入框下方常驻两个小按钮: 「检测本机」走 `GET /api/detect/:adapterId?force=1` 绕过 30 秒缓存重跑; 「指定文件夹检索…」先 `POST /api/fs/pick-directory` 选目录, 再 `POST /api/detect/:adapterId/scan {dir}`。
+- 后端 `scanHarness` + `walkForCommand`(BFS, 深度上限 10, 最多 30000 项, 跳过 `.git`), 命中 `source:'manual'`, 只在这个文件夹里找。
+- 验证: 隔离数据目录 + headless Edge/CDP 跑通 —— 条为实线 1px、含 ✓/✗、文案「检测到 Codex 0.166.0」; ✗ 后消失; 「检测本机」后回来; ✓ 回填 `E:\nodejs\node_global\codex.cmd` 并消失; 接口正例(dsh)命中、反例 `found:false`、缺 `dir` 返回 400; `npm test` 72/72。
+
 ## 2026-11-10 数据全收进安装目录 + 「低完整性」这个坑
 
 用户问"能不能所有东西(含数据、缓存)都只放在安装目录"。审计结论: 程序自身早已如此, 剩下的外部痕迹只有快捷方式、卸载注册表项、安装瞬间的 `%TEMP%`。
