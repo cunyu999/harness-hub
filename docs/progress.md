@@ -1,3 +1,26 @@
+## 2026-11-10 发行包: 自签名 + NSIS 安装器 + zip + sha256
+
+在桌面版跑通之后补齐"能发给别人"的那一层。三步都在本机实测。
+
+**签名**
+- 用 `New-SelfSignedCertificate -Type CodeSigningCert` 生成 `CN=Harness Hub, O=1hobby, OU=Local Build`(指纹 `501A7EE9…`, 3 年), pfx/cer 导出到 `.local/keys/`, 口令在 `.local/keys/pfx-password.txt`(`.local` 已忽略)。
+- `Set-AuthenticodeSignature` 对自签名证书返回 `UnknownError`(UntrustedRoot), 但签名本身写进去了: `Get-AuthenticodeSignature` 能读到 `SignerCertificate.Subject`, 从 zip 里抽出的 exe 也一样。别人机器上仍会显示"未知发布者", 除非把 `.cer` 装进「受信任的根证书」。
+- `pack-portable.mjs` 新增 `--sign=<指纹>`: 依次签 `HarnessHub.exe`、`HarnessHubCore.exe`, 安装器编完再签安装器。
+
+**NSIS 安装器** (`scripts/installer.nsi`)
+- per-user 安装到 `%LOCALAPPDATA%\Programs\HarnessHub`(`RequestExecutionLevel user`), MUI2 中文, 开始菜单 + 桌面快捷方式, HKCU 卸载键; `File /r /x data`, 卸载只删程序文件、保留 `data\`。
+- 两个坑都是实测撞出来的: ①`.nsi` 必须 UTF-8 **带 BOM**, 否则 `Bad text encoding`; ②32 位 makensis 编 300 MB 负载会 `Internal compiler error #12345: error creating mmap`, 解法是 `SetCompressor zlib` + 把 `TEMP` 指到项目内(`.local/tmp`)。
+- 静默安装 `/S /D=<dir>` 19 秒装完 7652 个文件; 启动、关窗(server exit 0)、`Uninstall.exe /S` 后只剩 `data\`。
+- 卸载残留修了两处: `LICENSE` 和 `vk_swiftshader_icd.json` 没删(加 `Delete "$INSTDIR\*.json"` 与 `Delete "$INSTDIR\LICENSE"`); 另外卸载删除是异步的, 2 秒轮询会误判。
+
+**发行物与校验**
+- `npm run pack -- --installer --sign=<指纹> --zip` 一条命令出全套: 程序目录 → 签名 → 安装器 → 签名安装器 → zip → 各自 `.sha256`。
+- `release/HarnessHub-0.1.0-win-x64.zip` 330.6 MB(`sha256 cbd6f7d4…`), `release/HarnessHub-0.1.0-win-x64-setup.exe` 327.8 MB(`sha256 673986c5…`); 两者都不含 `data/`。
+- 重新打包后删掉 `data/` 再冒烟: 1 秒就绪、`/api/health` 通、4 个适配器、3 条种子配置、关窗干净退出。
+- 体积汇总原本把 `data/` 算进去了(显示 1220 MB), 已改成只算程序文件。
+
+**限制**: 自签名不解决 SmartScreen; 安装器 327.8 MB(大头仍是 SDK vendor 343 MB); 没有自动更新; 只在本机验证。
+
 ## 2026-11-10 Windows 桌面版: Electron 壳 + 10 KB 启动器
 
 目标: 双击就是桌面程序, 不再借 Edge 窗口。约束是网络不通, 不能 `npm install electron`, 也不能引 .NET SDK。

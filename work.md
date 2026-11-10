@@ -134,7 +134,14 @@ git status --porcelain        # 应为空
 - 启动器另外做两件事: `SetErrorMode(0x0001|0x0002|0x8000)` 关掉硬错误弹窗(整棵进程树继承), 设 `HH_ERROR_MODE=1` 让后端不再经 PowerShell 重启自己。
 - 关窗流程: 壳拦截 `close` → 查 `/api/runtime` 的 `activeSessions`, 有任务先弹原生确认框("还有 N 个任务在运行") → `win.destroy()` → 后端 `close-intent` 优雅退出(实测 ~2.5s, exit code 0, `runtime.json` 删除); 6s 不退才 `taskkill /T /F`。
 - `HarnessHub-Edge.vbs` 保留为备用启动器(不想用 Electron 时); `npm run pack -- --no-electron` 只打 Edge 版。
-- 体积 808 MB(Electron 约 190 MB + SDK vendor 343 MB + node_modules); 未签名, SmartScreen 可能提示"未知发布者"。
+- 体积 808 MB(Electron 约 190 MB + SDK vendor 343 MB + node_modules)。
+- 发行物(2026-11-10 补齐): `npm run pack -- --installer --sign=<证书指纹> --zip` 一次产出
+  - `release/HarnessHub-0.1.0-win-x64.zip`(330.6 MB): 整个程序目录, 不含 `data/`, 两个 exe 已签名; 解压即用, 首次启动自动建 `data/`;
+  - `release/HarnessHub-0.1.0-win-x64-setup.exe`(327.8 MB): NSIS per-user 安装到 `%LOCALAPPDATA%\Programs\HarnessHub`, 快捷方式 + 卸载入口, 卸载保留 `data/`;
+  - 两者各带 `.sha256`(格式 `<hash>  <文件名>`)。
+- 签名: 自签名证书 `CN=Harness Hub, O=1hobby, OU=Local Build`(指纹 `501A7EE97BB27F0EDAC77AEB32D83EF976702C6D`, 2029-11 到期; pfx/cer 在 `.local/keys/`, 口令在 `pfx-password.txt`)。`Set-AuthenticodeSignature` 会返回 `UnknownError`(UntrustedRoot), 但签名确实写入; 别人机器上仍显示"未知发布者", 除非先把 `.cer` 装进「受信任的根证书」。
+- 打安装包的坑: `scripts/installer.nsi` 必须存成 UTF-8 **带 BOM**(否则 `Bad text encoding`); 只能 `SetCompressor zlib` 并把 `TEMP`/`TMP` 指到项目内(`.local/tmp`), 否则 32 位 makensis 在 300 MB 负载上报 `Internal compiler error #12345: error creating mmap`; makensis 用 `.local/tools/nsis/nsis-3.10/Bin/makensis.exe`(可用 `HH_MAKENSIS` 覆盖)。
+- 实测过的安装链路: 静默安装 `/S /D=<dir>` 19 秒 → 启动 → 关窗(server exit 0, `runtime.json` 删除)→ `Uninstall.exe /S` 后只剩 `data/`(数据库保留)。
 
 ---
 
@@ -146,7 +153,7 @@ git status --porcelain        # 应为空
 4. **(P2) Hermes 适配器**: 用户提过"后续能通过适配器增加 Hermes"; 本机未安装 Hermes, 需先确认其协议再写 `packages/adapters/src/hermes.ts` + 在 `buildAdapters` 注册 + `docs/adding-a-harness.md` 补一节。
 5. **(P2) 归档卫生**: `.local/archive` 仍有历史测试残留(如 `UI验收: 运行态`), 可考虑加"按前缀批量清理"按钮, 或在验收脚本里统一前缀并自动扫除。
 6. **(P3) 弹窗长期防护**: 给 `dsh`/`claude` 适配器的子进程也显式继承 `HH_ERROR_MODE`, 并在 `docs/compatibility.md` 记录排查方法。
-7. **(P1) 桌面版收尾**: Electron 壳已完成(§3.4); 剩余: 打 zip 便于拷贝、可选代码签名、瘦身(先查 SDK vendor 343 MB); 真安装包(NSIS)留到需要分发时再做。
+7. **(P1) 桌面版收尾**: Electron 壳、zip、自签名、NSIS 安装器都已完成(§3.4); 剩余: 让用户信任自签证书(或买正式签名)、瘦身(SDK vendor 343 MB)、自动更新。
 8. **(P3) 文档同步**: 每次功能变更后跑一遍 `docs/progress.md` / `docs/acceptance-report.md` / `README.md` 三处, 别只改代码。
 
 ---
@@ -304,6 +311,8 @@ $env:HH_EXIT_WITH_UI='0'; npm start   # 常驻(截图/验收时用)
 npm test                    # 72 项(会先 build:server)
 npm run doctor              # 磁盘体检(只读); -- --clean 清测试库/孤儿 home; -- --tmp 清 7 天前 tmp
 npm run pack                # 打包桌面版到 D:\1hobby\HarnessHub(会先 build); -- --skip-build 跳过构建; -- --no-electron 只打 Edge 版
+npm run pack -- --zip       # 额外产出 release\HarnessHub-<ver>-win-x64.zip(+ .sha256), 约 331 MB
+npm run pack -- --installer --sign=<证书指纹> --zip   # 全套: 签名两个 exe → 编并签名 NSIS 安装器 → 打 zip
 
 # 验证桌面版(从 harness 里别用 Start-Process, 会卡在 ShellExecute)
 explorer.exe "D:\1hobby\HarnessHub\HarnessHub.exe"
@@ -340,7 +349,7 @@ curl http://127.0.0.1:4310/api/runtime      # 看 exitOnUiClose / pageSeen
 - `.local/tmp` 目前主要由历史验收截图/patch 脚本占用(实测约 1.3GB/2.7 万文件); `npm run doctor -- --clean` 不动它, 要 `-- --tmp` 才清 7 天前的文件, 删前先确认没有还要复用的现场。
 - **便携版只在本机验证**: 未在没装 Node / 没装 Edge 的干净机器上试; 依赖本机已登录的 codex/claude/dsh, 没有做安装器与自动更新; 没有代码签名, SmartScreen 会提示未知发布者。
 - **桌面版必须带 `--no-sandbox`**: 这台机器上 Chromium 沙箱初始化会让 Electron 在 ready 前 `0xC0000005`, 所以由启动器固定传参; 若哪天换到正常机器, 这个参数仍可用, 但等于放弃了渲染进程沙箱。
-- **桌面版体积 808 MB**(Electron 约 190 MB + SDK vendor 343 MB + node_modules), 未打 zip、未签名、无自动更新; 界面里的"关闭"走原生确认框, 但没有托盘/最小化到托盘。
+- **桌面版体积 808 MB**, 发行 zip 330.6 MB / 安装器 327.8 MB; 已用自签名证书签名(别人机器仍报"未知发布者"); 无自动更新、无托盘/最小化到托盘。silent 安装可用 `/S /D=<dir>`。
 - **便携版体积 460 MB**(仅 Edge 版), 其中 SDK vendor 343 MB; 想瘦身要先确认 SDK 是否真的需要 vendor 里的 CLI 副本。
 
 ---

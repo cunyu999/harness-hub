@@ -15,12 +15,16 @@
  *   data/                    运行时数据(数据库/私有 home/工作区/日志), 重打包时保留
  *
  * 用法: npm run pack [-- --skip-build] [-- --no-electron] [-- --zip] [-- --zip-only]
+ *       [-- --installer] [-- --sign=<证书指纹>]
  *   --no-electron 只打 Edge 版(体积小, 但窗口是浏览器的)
  *   --zip         打完再压一个 zip 到 release/(不含 data/, 方便发给别人)
  *   --zip-only    不重新打包, 只把现有目录压成 zip
+ *   --installer   再编一个 NSIS 安装器到 release/(需要 makensis, 见 findMakensis)
+ *   --sign=<指纹> 用 CurrentUser\My 里的证书签 HarnessHub.exe / HarnessHubCore.exe / 安装器
  */
 
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
@@ -31,6 +35,9 @@ const skipBuild = args.has('--skip-build');
 const wantElectron = !args.has('--no-electron');
 const wantZip = args.has('--zip');
 const zipOnly = args.has('--zip-only');
+const wantInstaller = args.has('--installer');
+const signArg = process.argv.slice(2).find((a) => a.startsWith('--sign='));
+const signThumb = signArg ? signArg.slice('--sign='.length).trim() : '';
 const outDir = process.env.HH_PACK_DIR ? path.resolve(process.env.HH_PACK_DIR) : path.join(root, 'HarnessHub');
 
 /** 从 electron 的下载缓存里找最新的 win32-x64 包: 离线可用, 不联网。 */
@@ -66,6 +73,28 @@ function log(message) {
   process.stdout.write(`[pack] ${message}\n`);
 }
 
+/**
+ * 目标目录里的 Harness Hub 是否还在跑: 读 data\runtime.json 的端口, 再探 /api/health。
+ * 只看到 runtime.json 不算数——上次异常退出会留下过期文件。
+ */
+async function runningPort() {
+  const runtimeFile = path.join(outDir, 'data', 'runtime.json');
+  if (!existsSync(runtimeFile)) return 0;
+  let port = 0;
+  try {
+    port = Number(JSON.parse(readFileSync(runtimeFile, 'utf8')).port) || 0;
+  } catch {
+    return 0;
+  }
+  if (!(port > 0)) return 0;
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/api/health`, { signal: AbortSignal.timeout(1500) });
+    return res.ok ? port : 0;
+  } catch {
+    return 0;
+  }
+}
+
 /** 把程序目录压成 zip(排除 data/, 免得把本机的任务/凭据发给别人)。 */
 function makeZip() {
   const releaseDir = path.join(root, 'release');
@@ -84,21 +113,87 @@ function makeZip() {
     process.exit(1);
   }
   log(`zip 完成: ${(statSync(zipPath).size / 1024 / 1024).toFixed(1)} MB -> ${zipPath}`);
+  const sha = createHash('sha256').update(readFileSync(zipPath)).digest('hex');
+  writeFileSync(`${zipPath}.sha256`, `${sha}  ${path.basename(zipPath)}\r\n`, 'utf8');
+  log(`sha256: ${sha}`);
   return zipPath;
 }
+
+/** 用证书签名一个 exe(自签名证书的链不受信任是正常的, 签名本身仍会写进文件)。 */
+function signFile(file, thumbprint) {
+  if (!existsSync(file)) {
+    log(`跳过签名(文件不存在): ${file}`);
+    return;
+  }
+  const ps = [
+    `$cert = Get-ChildItem Cert:\\CurrentUser\\My | Where-Object { $_.Thumbprint -eq '${thumbprint}' };`,
+    `if (-not $cert) { Write-Error '找不到证书 ${thumbprint}'; exit 2 };`,
+    `$r = Set-AuthenticodeSignature -FilePath '${file}' -Certificate $cert -HashAlgorithm SHA256;`,
+    `Write-Output $r.Status`,
+  ].join(' ');
+  const res = spawnSync('powershell', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', ps], { encoding: 'utf8' });
+  const status = (res.stdout ?? '').trim();
+  if (res.status !== 0) {
+    console.error(`[pack] 签名失败: ${file} -> ${(res.stderr ?? '').trim() || status}`);
+    process.exit(1);
+  }
+  log(`已签名: ${path.basename(file)} (${status})`);
+}
+
+/** 找 makensis: 环境变量 HH_MAKENSIS > 项目内便携 NSIS > PATH。 */
+function findMakensis() {
+  if (process.env.HH_MAKENSIS) {
+    return existsSync(process.env.HH_MAKENSIS) ? process.env.HH_MAKENSIS : null;
+  }
+  const base = path.join(root, '.local', 'tools', 'nsis');
+  if (existsSync(base)) {
+    for (const dir of readdirSync(base)) {
+      const exe = path.join(base, dir, 'Bin', 'makensis.exe');
+      if (existsSync(exe)) return exe;
+    }
+  }
+  const res = spawnSync('where', ['makensis'], { encoding: 'utf8' });
+  const found = (res.stdout ?? '').split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+  return found[0] ?? null;
+}
+
+/** 用 NSIS 编一个 per-user 安装器到 release/。 */
+function buildInstaller() {
+  const makensis = findMakensis();
+  if (!makensis) {
+    console.error('[pack] 找不到 makensis: 把 NSIS 便携版解压到 .local/tools/nsis, 或设 HH_MAKENSIS 指向 makensis.exe');
+    process.exit(1);
+  }
+  const releaseDir = path.join(root, 'release');
+  mkdirSync(releaseDir, { recursive: true });
+  const setup = path.join(releaseDir, `HarnessHub-${pkg.version}-win-x64-setup.exe`);
+  rmSync(setup, { force: true });
+  // makensis 是 32 位程序; 默认临时目录在 C: 时编 300 MB 级负载会 "error creating mmap",
+  // 把 TEMP 指到项目内就正常了。
+  const tmp = path.join(root, '.local', 'tmp', 'nsis-tmp');
+  mkdirSync(tmp, { recursive: true });
+  log(`编安装器: ${path.basename(setup)}`);
+  const res = spawnSync(
+    makensis,
+    ['/V2', `/DPKG_DIR=${outDir}`, `/DOUT_FILE=${setup}`, `/DAPP_VERSION=${pkg.version}`, path.join(root, 'scripts', 'installer.nsi')],
+    { stdio: 'inherit', env: { ...process.env, TEMP: tmp, TMP: tmp } },
+  );
+  if (res.error || res.status !== 0) {
+    console.error(`[pack] 安装器编译失败: ${res.error?.message ?? `makensis exit ${res.status}`}`);
+    process.exit(1);
+  }
+  log(`安装器: ${setup}(${(statSync(setup).size / 1024 / 1024).toFixed(1)} MB)`);
+  return setup;}
 
 if (zipOnly) {
   if (!existsSync(outDir)) {
     log(`目录不存在: ${outDir}, 先跑 npm run pack`);
     process.exit(1);
   }
-  const runtimeFile = path.join(outDir, 'data', 'runtime.json');
-  if (existsSync(runtimeFile)) {
-    const info = JSON.parse(readFileSync(runtimeFile, 'utf8'));
-    if (info?.port) {
-      log(`${outDir} 里的 Harness Hub 还在运行(端口 ${info.port}), 请先关掉窗口再压缩。`);
-      process.exit(1);
-    }
+  const port = await runningPort();
+  if (port > 0) {
+    log(`${outDir} 里的 Harness Hub 还在运行(端口 ${port}), 请先关掉窗口再压缩。`);
+    process.exit(1);
   }
   makeZip();
   process.exit(0);
@@ -147,25 +242,10 @@ for (const required of ['dist/apps/server/src/index.js', 'apps/web/dist/index.ht
 
 // 2) 目标目录里如果还有便携版在跑, 先停下: 删运行中的程序文件/数据库会报 EPERM,
 //    也会把用户正在用的任务打断。判断依据是 data\runtime.json + /api/health。
-const runningRuntime = path.join(outDir, 'data', 'runtime.json');
-if (existsSync(runningRuntime)) {
-  let port = 0;
-  try {
-    port = Number(JSON.parse(readFileSync(runningRuntime, 'utf8')).port) || 0;
-  } catch {
-    /* 坏文件当作没在跑 */
-  }
-  if (port > 0) {
-    try {
-      const res = await fetch(`http://127.0.0.1:${port}/api/health`, { signal: AbortSignal.timeout(1500) });
-      if (res.ok) {
-        console.error(`[pack] ${outDir} 里的 Harness Hub 还在运行(端口 ${port}), 请先关掉窗口再打包。`);
-        process.exit(1);
-      }
-    } catch {
-      /* 健康检查不通就认为已经退出 */
-    }
-  }
+const livePort = await runningPort();
+if (livePort > 0) {
+  console.error(`[pack] ${outDir} 里的 Harness Hub 还在运行(端口 ${livePort}), 请先关掉窗口再打包。`);
+  process.exit(1);
 }
 
 // 3) 准备输出目录。只清程序文件, data/ 是用户数据, 必须留着。
@@ -450,8 +530,23 @@ writeFileSync(
   'utf8',
 );
 
-// 8) 汇总。
+// 8) 签名(可选) -> 安装器 -> 汇总 -> 打包。
+if (signThumb) {
+  signFile(path.join(outDir, 'HarnessHub.exe'), signThumb);
+  signFile(path.join(outDir, 'HarnessHubCore.exe'), signThumb);
+}
+if (wantInstaller) {
+  const setup = buildInstaller();
+  if (signThumb) signFile(setup, signThumb);
+  const setupSha = createHash('sha256').update(readFileSync(setup)).digest('hex');
+  writeFileSync(`${setup}.sha256`, `${setupSha}  ${path.basename(setup)}\r\n`, 'utf8');
+  log(`安装器 sha256: ${setupSha}`);
+}
+// 汇总时只看程序文件: data/ 是用户数据(可能很大), 不该混进"包体积"。
 const total = dirSize(outDir);
-log(`完成: ${(total.bytes / 1024 / 1024).toFixed(1)} MB, ${total.files} 个文件`);
+const programBytes = readdirSync(outDir)
+  .filter((name) => name !== 'data')
+  .reduce((sum, name) => sum + dirSize(path.join(outDir, name)).bytes, 0);
+log(`完成: ${(programBytes / 1024 / 1024).toFixed(1)} MB 程序文件(${total.files} 个文件含 data)`);
 log(`双击 ${path.join(outDir, desktopExe ? 'HarnessHub.exe' : 'HarnessHub-Edge.vbs')} 启动`);
 if (wantZip) makeZip();
