@@ -1,3 +1,17 @@
+## 2026-11-10 「执行配置」自动检测本机已安装的 harness
+
+用户要求: 打开某份执行配置时, 若本机装了对应的 harness, 就在表单里给一个内联的「已检测到 X, 是否使用」; 点了自动回填; 没检测到就不显示; 不弹窗、不打扰; codex / claude / dsh 各自独立。
+
+**实现**
+- `apps/server/src/detect.ts`: 依次在 PATH(`whichSync`, 走 PATHEXT 认 `.cmd`/`.ps1` 垫片)、项目内 `.local/tools/node_modules/.bin`、npm 全局(`%APPDATA%\npm`)找命令; `--version` 取版本(8s 超时, 失败不影响"已检测到"); 默认凭据目录(`~/.codex`、`~/.claude`、`~/.dsh`)存在才给。结果按适配器缓存 30s。
+- 接口: `GET /api/detect/:adapterId` → `DetectResultDto`(契约在 `packages/contracts/src/api.ts`, 路由与处理在 `apps/server/src/http.ts`)。
+- 前端 `apps/web/src/components/Dialogs.tsx`: 选中配置/新建时静默探测当前适配器; 命中且与输入框不同时显示 chip 按钮「已检测到 Codex 0.166.0, 是否使用?」; 点击回填 `executableRef`, 只在用户没填时补 `sourceHome`。样式在 `apps/web/src/styles.css` 的 `.pf-detect`。
+
+**验证**
+- `npm run typecheck`、`npm run typecheck:web`、`npm run build:web` 通过。
+- 用隔离数据目录起服务打接口: codex → `E:\nodejs\node_global\codex.cmd`(0.166.0, `~/.codex`); claude-code → `claude.cmd`(2.1.318, `~/.claude`); dsh → `.local\tools\node_modules\.bin\dsh.cmd`(0.2.1-rc.5, `~/.dsh`); mock → `found:false`。
+- 未做界面点击验证, 留待手动确认。
+
 ## 2026-11-10 数据全收进安装目录 + 「低完整性」这个坑
 
 用户问"能不能所有东西(含数据、缓存)都只放在安装目录"。审计结论: 程序自身早已如此, 剩下的外部痕迹只有快捷方式、卸载注册表项、安装瞬间的 `%TEMP%`。

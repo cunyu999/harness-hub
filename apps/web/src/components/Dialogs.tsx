@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { DirectoryPicker } from './DirectoryPicker';
-import { ApiError, api, type ArchiveEntryDto, type ProfileDto } from '../api';
+import { ApiError, api, type ArchiveEntryDto, type DetectResultDto, type ProfileDto } from '../api';
 import { bytes, stamp } from '../lib/format';
 
 type SandboxMode = 'read-only' | 'workspace-write' | 'danger-full-access';
@@ -482,6 +482,8 @@ export function ProfilesPanel({
   const [draft, setDraft] = useState<Draft | null>(() => (profiles[0] ? toDraft(profiles[0]) : null));
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<{ tone: 'ok' | 'bad' | 'muted'; text: string } | null>(null);
+  /** 本机安装探测结果, 按适配器缓存(互不影响); 只在命中时显示一个可点的内联提示。 */
+  const [detected, setDetected] = useState<Record<string, DetectResultDto>>({});
 
   useEffect(() => {
     void api
@@ -497,6 +499,38 @@ export function ProfilesPanel({
     if (fresh) setDraft((prev) => (prev && prev.id === fresh.id ? toDraft(fresh) : prev));
   }, [profiles, selected]);
 
+  // 打开某个适配器的配置时静默探测本机安装: 命中就在表单里显示一个可点的内联提示, 未命中不显示。
+  useEffect(() => {
+    const adapterId = draft?.adapterId;
+    if (!adapterId || detected[adapterId]) return;
+    let alive = true;
+    void api
+      .detectHarness(adapterId)
+      .then((hit) => {
+        if (alive) setDetected((prev) => ({ ...prev, [adapterId]: hit }));
+      })
+      .catch(() => {
+        if (alive) {
+          setDetected((prev) => ({
+            ...prev,
+            [adapterId]: {
+              adapterId,
+              displayName: adapterId,
+              found: false,
+              executableRef: null,
+              version: null,
+              sourceHome: null,
+              source: null,
+              checkedAt: '',
+            },
+          }));
+        }
+      });
+    return () => {
+      alive = false;
+    };
+  }, [draft?.adapterId, detected]);
+
   const groups = useMemo(() => {
     const order = adapters.length > 0 ? adapters.map((a) => a.id) : Array.from(new Set(profiles.map((p) => p.adapterId)));
     const label = (id: string) => adapters.find((a) => a.id === id)?.displayName ?? id;
@@ -508,6 +542,8 @@ export function ProfilesPanel({
   }, [adapters, profiles]);
 
   const current = profiles.find((p) => p.id === selected) ?? null;
+  /** 当前适配器在本机的探测结果; 只用来决定要不要显示「是否使用」。 */
+  const detectedHit = draft ? (detected[draft.adapterId] ?? null) : null;
 
   const pick = (p: ProfileDto) => {
     setSelected(p.id);
@@ -532,6 +568,20 @@ export function ProfilesPanel({
       enabled: true,
     });
     setNotice({ tone: 'muted', text: '这个配置归属当前分组对应的适配器; 填好名称与可执行入口后保存。' });
+  };
+
+  /** 用户点「是否使用」后回填: 路径必填, 凭据目录只在用户没填时才补。 */
+  const applyDetected = (hit: DetectResultDto) => {
+    setDraft((prev) =>
+      prev
+        ? {
+            ...prev,
+            executableRef: hit.executableRef ?? prev.executableRef,
+            sourceHome: prev.sourceHome.trim() ? prev.sourceHome : (hit.sourceHome ?? ''),
+          }
+        : prev,
+    );
+    setNotice({ tone: 'muted', text: `已填入检测到的 ${hit.displayName} 路径, 保存后生效` });
   };
 
   const save = async () => {
@@ -737,6 +787,14 @@ export function ProfilesPanel({
                       onChange={(e) => setDraft({ ...draft, executableRef: e.target.value })}
                       placeholder={execHint(draft.adapterId)}
                     />
+                    {detectedHit && detectedHit.found && detectedHit.executableRef && draft.executableRef.trim() !== detectedHit.executableRef ? (
+                      <button type="button" className="pf-detect" onClick={() => applyDetected(detectedHit)}>
+                        <span className="pf-detect-dot" aria-hidden="true" />
+                        已检测到{' '}
+                        {detectedHit.version ? `${detectedHit.displayName} ${detectedHit.version}` : detectedHit.displayName}
+                        , 是否使用?
+                      </button>
+                    ) : null}
                   </div>
                   <div className="field pf-span">
                     <label>凭据来源目录(每回合择新同步到项目内私有 home, 不移动源文件)</label>

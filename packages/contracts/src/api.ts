@@ -85,6 +85,24 @@ export interface ProfileDto extends ExecutionProfile {
   homeSync?: HomeSyncStatus | null;
 }
 
+/* ------------------------ harness detection ------------------------ */
+
+/** 「执行配置」里的本机安装探测结果; 前端据此显示一个可点的「已检测到, 是否使用」。 */
+export interface DetectResultDto {
+  adapterId: string;
+  displayName: string;
+  found: boolean;
+  /** 检测到的可执行入口绝对路径, 可直接填进 profile.executableRef。 */
+  executableRef: string | null;
+  version: string | null;
+  /** 检测到的默认凭据来源目录(存在才给)。 */
+  sourceHome: string | null;
+  /** 从哪儿找到的: PATH / 项目内工具目录 / npm 全局目录。 */
+  source: 'path' | 'project' | 'npm' | null;
+  checkedAt: string;
+  detail?: string;
+}
+
 export interface HomeSyncStatus {
   dir: string;
   sourceHome: string | null;

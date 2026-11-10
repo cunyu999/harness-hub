@@ -33,7 +33,9 @@ import { EngineError, type Engine } from '../../../packages/core/src/engine.js';
 import { isInside, mediaTypeFor, newId, normalizeRelPath, nowIso } from '../../../packages/core/src/util.js';
 import type { Repo } from '../../../packages/storage/src/repo.js';
 import type { HarnessAdapter } from '../../../packages/adapters/src/types.js';
+import type { AdapterId } from '../../../packages/contracts/src/types.js';
 import type { AppConfig } from './config.js';
+import { detectHarness } from './detect.js';
 import { guessMediaType, listDirectory, pickDirectoryNative } from './fs.js';
 import { homeSyncStatus, preparePrivateHome } from './homes.js';
 import type { RuntimeControl } from './runtime-control.js';
@@ -108,6 +110,7 @@ export class ApiServer {
     this.add('DELETE', '/api/profiles/:id', (ctx) => this.deleteProfile(ctx));
     this.add('POST', '/api/profiles/:id/probe', (ctx) => this.probeProfile(ctx));
     this.add('GET', '/api/adapters', () => this.listAdapters());
+    this.add('GET', '/api/detect/:adapterId', (ctx) => this.detectAdapter(ctx));
 
     // 网页里的"选择工作区": 只读列目录
     this.add('GET', '/api/fs/list', (ctx) => this.listFs(ctx));
@@ -385,6 +388,11 @@ export class ApiServer {
 
   private listAdapters() {
     return Object.values(this.engineAdapters()).map((a) => ({ id: a.id, displayName: a.displayName, mock: a.mock }));
+  }
+
+  /** 只读探测本机是否装了某个 harness; 前端在配置表单里据此显示内联的「是否使用」。 */
+  private detectAdapter(ctx: Ctx) {
+    return detectHarness(ctx.params.adapterId as AdapterId, this.cfg.root);
   }
 
   private listProfiles(): ProfileDto[] {
