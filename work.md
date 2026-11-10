@@ -87,7 +87,7 @@
 | 界面验收 `node scripts/acceptance-ui.mjs` | **28/28 通过**(含"清理临时数据"断言) |
 | 真实 harness `node scripts/acceptance-live.mjs` | **9/9 通过**(Claude Code 主控 + DSH 执行, 1.6 分钟 `completed`, Σ 130681 tokens / 4 回合) |
 | 本地 git | HEAD `2655f91`(本轮 handoff); 之后又有未提交改动: home 同步 / Codex 种子不再钉模型 / 进程树取消 / attempt 诊断 / 产物卫生 / 审批通知 |
-| 远端 git | 上一次成功推送到 `d36c07f`; **`fb1e29a`、`2655f91` 及本轮改动均未推送**(代理未开时推不上去) |
+| 远端 git | 已推送至 **`8019653`**(2026-11-10), 与本地 HEAD 一致 |
 | 服务 | 当前**未运行**(默认模式下关页会停), 需要时 `npm start` |
 | 任务库 | 1 条真实任务(课程报告, completed)、18 条归档(历史演示与真实证据) |
 | 便携版 / 桌面版 | `D:\1hobby\HarnessHub`(808.1 MB / 7750 文件), 双击 `HarnessHub.exe`(Electron 壳)启动, `HarnessHub-Edge.vbs` 是 Edge 备用; 数据都在 `HarnessHub\data`; 未打 zip、未签名、无安装器 |
@@ -106,18 +106,17 @@
 
 **剩余风险**: 若用户仍看到弹窗, 先记**弹窗标题**与时间, 再按 §6.2 的方法定位是哪个子进程没继承到 error mode。
 
-### 3.2 另一个待办: 推送
+### 3.2 推送(已完成, 2026-11-10)
 
-GitHub 直连被 reset、系统代理 `127.0.0.1:7897` 未开。代理恢复后执行:
+代理恢复后已推送: 远端从 `d36c07f` 快进到 **`8019653`**, 与本地一致(`fb1e29a`、`2655f91`、`8019653` 三个提交都上去了)。核对命令:
 
 ```bash
 cd D:\1hobby
-git log --oneline -3                          # 看当前 HEAD 与最近提交
-git status                                     # 应有本轮未提交改动
-git -c http.proxy= -c https.proxy= push      # 代理开着就直接 git push
+git fetch origin main && git log --oneline -1 origin/main
+git status --porcelain        # 应为空
 ```
 
-然后 `git -c http.proxy= -c https.proxy= ls-remote --heads origin main` 确认远端 HEAD == `2655f91`。
+以后再有未推送提交, 先看 `git status` 与 `git log --oneline origin/main..HEAD`; 代理没开就等, 不要强推或改历史。
 
 ### 3.3 便携版(2026-11-09 新增, 与开发目录隔离)
 
@@ -142,7 +141,7 @@ git -c http.proxy= -c https.proxy= push      # 代理开着就直接 git push
 ## 4. 下一步计划(按优先级)
 
 1. **(P0) 收尾弹窗**: 拿到用户提供的弹窗标题; 若仍是 0xC0000142, 用 `Get-Process` + 事件时间对齐定位是哪个子进程, 考虑给 `dsh/claude` 再包一层启动器; 若确认是"位置不可用", 只需确认没有自动化脚本再触发 reveal 后删目录。
-2. **(P0) 推送 `fb1e29a` + `2655f91` + 本轮改动** 并核对远端。
+2. ~~**(P0) 推送**~~: 已完成(远端 == `8019653`, 见 §3.2)。
 3. **(P1) 真实 Codex 端到端**: 目前 live 验收只覆盖 Claude Code 主控 + DSH 执行。Codex 已通过探针(0.166.0)与真实回合, 但**没跑过完整任务链**, 需要在用户确认额度后补一轮 `HH_LIVE_LEAD=codex node scripts/acceptance-live.mjs`。
 4. **(P2) Hermes 适配器**: 用户提过"后续能通过适配器增加 Hermes"; 本机未安装 Hermes, 需先确认其协议再写 `packages/adapters/src/hermes.ts` + 在 `buildAdapters` 注册 + `docs/adding-a-harness.md` 补一节。
 5. **(P2) 归档卫生**: `.local/archive` 仍有历史测试残留(如 `UI验收: 运行态`), 可考虑加"按前缀批量清理"按钮, 或在验收脚本里统一前缀并自动扫除。
@@ -352,5 +351,5 @@ curl http://127.0.0.1:4310/api/runtime      # 看 exitOnUiClose / pageSeen
 2. `npm install && npm run build && npm test` —— 应得 72/72。
 3. `npm start` 打开 http://127.0.0.1:4310 , 用 `Mock A` 建一个小任务走完「规划→批准→执行→交付」, 确认界面与事件流正常(不花额度)。
 4. `node scripts/acceptance-api.mjs`(服务在跑)→ 53/53; 再 `node scripts/acceptance-ui.mjs` → 28/28。
-5. 先处理 §3.2 的推送, 再按 §4 的 P0/P1 推进; 动代码前先看 `docs/decisions.md` 与 `docs/progress.md` 顶部, 避免推翻既有裁定。
+5. 先确认 `git log --oneline origin/main..HEAD` 为空(已同步), 再按 §4 的 P0/P1 推进; 动代码前先看 `docs/decisions.md` 与 `docs/progress.md` 顶部, 避免推翻既有裁定。
 6. 任何涉及"打开真实文件夹/进程序列/额度"的动作, 先跟用户确认。
