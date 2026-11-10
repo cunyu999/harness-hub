@@ -526,6 +526,7 @@ export function ProfilesPanel({
               sourceHome: null,
               source: null,
               checkedAt: '',
+              detail: '探测请求失败',
             },
           }));
         }
@@ -557,6 +558,14 @@ export function ProfilesPanel({
       draft.executableRef.trim() !== detectedHit.executableRef &&
       dismissed[detectedHit.adapterId] !== detectedHit.executableRef,
   );
+  /** 探测过了但没找到: 给一句安静的回执, 用户自己填了路径就收起来。mock 适配器不算"未检测到"。 */
+  const draftIsMock = adapters.find((a) => a.id === draft?.adapterId)?.mock ?? false;
+  const draftAdapterName = adapters.find((a) => a.id === draft?.adapterId)?.displayName ?? draft?.adapterId ?? '';
+  const detectMiss = Boolean(detectedHit && !detectedHit.found && draft && !draftIsMock && !draft.executableRef.trim());
+  const detectMissText =
+    detectedHit?.detail === '探测请求失败'
+      ? '检测请求没成功, 可以直接填绝对路径。'
+      : `未检测到本机安装的 ${draftAdapterName}。可以点上面的「指定文件夹检索…」, 或直接填绝对路径。`;
 
   const pick = (p: ProfileDto) => {
     setSelected(p.id);
@@ -893,6 +902,11 @@ export function ProfilesPanel({
                         >
                           ✗
                         </button>
+                      </div>
+                    ) : null}
+                    {detectMiss ? (
+                      <div className="pf-miss" role="status">
+                        {detectMissText}
                       </div>
                     ) : null}
                   </div>

@@ -1,3 +1,12 @@
+## 2026-11-10 「未检测到本机安装的 X」提示
+
+用户反馈: 自动检测没命中时界面上什么也没有, 分不清是"没装"还是"还在探测"。
+
+- `apps/web/src/components/Dialogs.tsx`: `detectMiss` = 已有探测结果、`found` 为 false、不是 mock 适配器、输入框还是空的; 满足时在检测按钮下面渲染一行 `.pf-miss`。
+- 文案分两种: 正常未命中是「未检测到本机安装的 X。可以点上面的『指定文件夹检索…』, 或直接填绝对路径。」; 探测请求本身失败(网络/接口)是「检测请求没成功, 可以直接填绝对路径。」——避免把接口故障说成"没装"。
+- mock 适配器不提示(它不需要路径); 用户一旦自己填了路径, 提示自动收起; 点「检测本机」重新探测会刷新结果。
+- 样式 `.pf-miss`: 12px、`var(--text-3)`、行高 1.6, 与按钮拉开 6px, 不抢视觉重量。
+- 验证: 用临时的 `HH_ROOT`(空 `.local/tools`)+ 精简 `PATH` + 空 `APPDATA` 起一个"什么都没装"的服务(注意要设 `HH_ERROR_MODE=1`, 否则精简 PATH 下找不到 powershell, 服务会静默退出), 再用 headless Edge + CDP 点开「执行配置」: `.pf-miss` 文案为「未检测到本机安装的 Codex。可以点上面的『指定文件夹检索…』, 或直接填绝对路径。」, `.pf-detect` 为 null; 截图 `miss-check.png`。
 ## 2026-11-10 品牌图标 + 首屏观感(参考 lancer 的流动描边)
 
 用户要求: 换一个更美观的程序图标; 前端按 Beautiful UI / BeUI / Rare UI / Transitions / shadcn/ui 这类资源的方向改, 零依赖优先; 并参考 `raylee-ai/lancer` 的动态光效与排版。

@@ -3272,6 +3272,8 @@ table.grid tbody tr.rowclick:focus-visible { outline: 2px solid var(--accent); o
 .pf-mini { padding: 3px 9px; border: 1px solid var(--line-2); border-radius: 6px; background: transparent; color: var(--text-2); font-size: 12px; cursor: pointer; }
 .pf-mini:hover:not(:disabled) { color: var(--text); border-color: var(--accent-line); }
 .pf-mini:disabled { opacity: 0.6; cursor: default; }
+/* 探测过但没找到: 一句安静的提示, 不抢按钮的位置。 */
+.pf-miss { align-self: flex-start; margin-top: 6px; color: var(--text-3); font-size: 12px; line-height: 1.6; }
 
 /* ------------------- 2026-11-10 品牌与首屏观感 ------------------- */
 
