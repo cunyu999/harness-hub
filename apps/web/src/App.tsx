@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, type ProfileDto } from './api';
 import { useTask, useTaskList } from './store';
 import { CollabGraph, type GraphSelection } from './components/CollabGraph';
+import { BrandMark } from './components/BrandMark';
 import { NodeDetail } from './components/NodeDetail';
 import { PlanPanel } from './components/PlanPanel';
 import { ApprovalPanel, ArtifactPanel, EventTimeline, ReviewPanel } from './components/Panels';
@@ -203,7 +204,7 @@ export function App() {
     <div className="app">
       <aside className="sidebar">
         <div className="brand">
-          <div className="brand-mark" />
+          <BrandMark size={30} />
           <div className="brand-text">
             <div className="brand-name">Harness Hub</div>
             <div className="brand-sub">多 Harness 统一调度</div>
@@ -263,7 +264,12 @@ export function App() {
         <div className="task-list">
           {tasks.length === 0 ? <div className="empty">还没有任务。<br />点击下方“新建任务”。</div> : null}
           {tasks.map((t) => (
-            <div key={t.id} className={`task-row ${t.id === taskId ? 'active' : ''}`}>
+            <div key={t.id} className={`task-row ${t.id === taskId ? 'active' : ''} ${TERMINAL.includes(t.lifecycle) ? '' : 'running'}`}>
+              {TERMINAL.includes(t.lifecycle) ? null : (
+                <svg className="run-border" aria-hidden="true">
+                  <rect x="0" y="0" width="100%" height="100%" rx="11" />
+                </svg>
+              )}
               <button
                 className="task-item"
                 onClick={() => {
@@ -382,13 +388,37 @@ export function App() {
                 <CollabGraph detail={detail} events={state.events} selection={selection} onSelect={pickSelection} />
               </>
             ) : (
-              <div className="graph-empty" style={{ position: 'relative', flex: 1, display: 'grid', placeItems: 'center' }}>
-                <div>
-                  <div style={{ fontSize: 15, marginBottom: 6 }}>统一工作台</div>
-                  <div className="small muted" style={{ maxWidth: 380, lineHeight: 1.7 }}>
-                    左侧选择任务, 或新建任务。协作图只反映真实事件: 会话连接、工具调用、审批、审核与交付。
-                    <br />
-                    计划生成后需要你明确选择“直接执行 / 补充内容 / 重新计划”。
+              <div className="empty-stage">
+                <div className="empty-card">
+                  <div className="empty-watermark" aria-hidden="true">
+                    <BrandMark size={240} />
+                  </div>
+                  <div className="empty-kicker">Harness Hub</div>
+                  <h2 className="empty-title">统一工作台</h2>
+                  <p className="empty-desc">
+                    新建一个任务, 选好主控与执行者。之后协作图只画真实事件: 会话连接、工具调用、审批、审核与交付。
+                  </p>
+                  <ul className="empty-features">
+                    {[
+                      '计划先给你过目: 直接执行 / 补充内容 / 重新计划',
+                      '多强模型时先讨论、执行后交叉复核',
+                      '产物留在项目内, 每次尝试都有诊断日志',
+                    ].map((line) => (
+                      <li key={line}>
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" aria-hidden="true">
+                          <path d="M4 12.5l5 5L20 6.5" strokeLinecap="round" strokeLinejoin="round" />
+                        </svg>
+                        <span>{line}</span>
+                      </li>
+                    ))}
+                  </ul>
+                  <div className="empty-actions">
+                    <button className="btn primary" onClick={() => setShowNew(true)}>
+                      新建任务
+                    </button>
+                    <button className="btn" onClick={() => setShowProfiles(true)}>
+                      执行配置 ({profiles.filter((p) => p.enabled).length})
+                    </button>
                   </div>
                 </div>
               </div>

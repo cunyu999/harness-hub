@@ -1,3 +1,23 @@
+## 2026-11-10 品牌图标 + 首屏观感(参考 lancer 的流动描边)
+
+用户要求: 换一个更美观的程序图标; 前端按 Beautiful UI / BeUI / Rare UI / Transitions / shadcn/ui 这类资源的方向改, 零依赖优先; 并参考 `raylee-ai/lancer` 的动态光效与排版。
+
+**图标**
+- `apps/web/public/favicon.svg` 重画: 512 viewBox, 深色圆角方(带一点高光)、外圈轨道、紫→青渐变的 **H**, H 中心嵌一枚青色核。
+- `scripts/make-icon.mjs`(零依赖): 用 Edge `--headless=new --screenshot` 把内嵌 SVG 渲成 512 PNG, 自写 `decodePng`(IHDR/IDAT/inflate/反滤波)与 ICO 编码(40 B BITMAPINFOHEADER、32bpp BI_RGB、bottom-up BGRA + 全 0 AND 掩码), 再面积平均缩到 16/24/32/48/64/128/256。产出 `apps/desktop/assets/icon.png` 与 `icon.ico`。
+- 两个坑: 该环境下 Edge 的 DevTools `/json/list` 对 Node 侧不稳定(Edge 明明在听), 所以不走 CDP; 用 `--window-size=16..256` 截图得到的帧**全透明**, 只有 512 正常 —— 改为只截 512 再缩放。
+- 接入: `apps/desktop/main.js` 的 BrowserWindow `icon`; 启动器 csc 加 `/win32icon`; 内核 exe 用 rcedit 写图标 + 版本串(没 rcedit 就跳过, 不致命); `scripts/installer.nsi` 的 `MUI_ICON` / `MUI_UNICON`。
+
+**前端**
+- `apps/web/src/components/BrandMark.tsx`: 与 favicon 同几何的内联 SVG, `useId()` 生成唯一渐变 id, 侧栏 30px 与首屏水印 240px 共用。
+- 首屏空态: `.empty-stage` / `.empty-card` —— 大写字距 kicker、标题、一句说明、三条 ✓ 特性、`新建任务` + `执行配置 (N)` 两个按钮; 右上角水印用径向遮罩把方形边缘化开(浅色下 opacity 0.06, 不抢视线)。
+- 运行态: 非终态任务行叠一层 SVG `rect`, `stroke-dasharray: 9 91` + `hh-run 3.6s linear infinite` 的流动虚线(参考 lancer 的 running border), `prefers-reduced-motion` 下停动画。
+- 细节: 主按钮顶部高光 + hover 轻抬; `.dock-tab.active` 改成渐变下划线(原实线 border 置透明), 切换时从中间展开; `::selection` 用品牌色; 浅色空态加一层很淡的 accent 光晕。
+
+**验证**
+- `npm run typecheck`、`typecheck:web`、`build:web` 通过(css 49.81 kB, js 347.44 kB); `npm test` 72/72(20.2 s)。
+- 截图对比: 深色 `after-dark3.png`、浅色 `after-light3.png`(浅色水印调了两轮才不显"贴纸")。
+- 图标接触表(16→256)在深色底上都清晰可辨。
 ## 2026-11-10 「执行配置」自动检测本机已安装的 harness
 
 用户要求: 打开某份执行配置时, 若本机装了对应的 harness, 就在表单里给一个内联的「已检测到 X, 是否使用」; 点了自动回填; 没检测到就不显示; 不弹窗、不打扰; codex / claude / dsh 各自独立。

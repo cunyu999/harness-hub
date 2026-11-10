@@ -145,6 +145,7 @@ git status --porcelain        # 应为空
 - **数据全部收进安装目录**(2026-11-10): 启动器启动前建 `data\tmp`, 并把 `TEMP`/`TMP`/`TMPDIR` 指过去 —— Electron、后端、harness 子进程都继承, 不在系统 `%TEMP%` 留文件; 崩溃转储也改到 `data\electron\Crashpad` 并加 `disable-crash-reporter`(否则崩一次就在 `%LOCALAPPDATA%\CrashDumps` 留 `.dmp`)。实测: 删 `data` 后启动 → 全盘扫 `%USERPROFILE%`/`%LOCALAPPDATA%`/`%APPDATA%`/`%TEMP%`(3 层) 新增文件 181 个, 逐个归属全是其它程序(MATLAB、抖音、Edge 临时 profile 等), 没有一个是本程序的。
 - 「应用和功能」条目: 安装器装时写 HKCU 卸载键; 桌面壳启动时若同目录有 `Uninstall.exe` 再用 `reg.exe ... /reg:32` 补写一次(补齐 `InstallLocation`/`QuietUninstallString`, 并兜住安装器写失败或用户手动搬目录的情况)。zip 绿色版没有 `Uninstall.exe`, 不写任何注册表。
 - 开始菜单/桌面快捷方式改成安装器的可选组件(`Section /o`, 默认不勾), 需要才装。
+- 图标(2026-11-10): `scripts/make-icon.mjs` 用 Edge headless 把 `apps/web/public/favicon.svg` 渲成 512 PNG, 自写 PNG 解码与 ICO 编码, 生成 `apps/desktop/assets/icon.png` / `icon.ico`; 窗口用 png, 启动器( csc `/win32icon` )、内核 exe( rcedit, 缺了就跳过 )与安装器( `MUI_ICON` )用 ico。
 
 ---
 
@@ -203,6 +204,7 @@ git status --porcelain        # 应为空
 - Electron 窗口在后台启动时可能被系统按最小化创建; `ready-to-show` 里 `isMinimized()` 时补一次 `restore()+focus()`。
 - **在 `D:\1hobby` 里直接运行任何 exe, 拿到的是低完整性令牌**(`whoami /groups` 显示 `Mandatory Label\Low Mandatory Level`, 而正常 pwsh 是 High)。低完整性对 `HKCU\Software` 只读, 于是 NSIS 的 `WriteRegStr` 和 `reg.exe add` 都报 `拒绝访问`。**验证安装器/桌面壳要把 exe 放到 `%TEMP%`、Downloads 这类工作区外的路径再跑**: 同一份 setup 从 `%TEMP%` 跑, 卸载键、`data\tmp`、卸载删除全部正常。别把它误判成产品缺陷。
 - **codex 的 `--version` 也会在 home 下建 `tmp/arg0-*` 目录**: `detect.ts` 探测版本时把 `CODEX_HOME` / `CLAUDE_CONFIG_DIR` / `DSH_HOME` 指到 `<数据目录>/tmp/detect/...`, 否则每点一次「执行配置」都会在 `~/.codex` 里留垃圾。
+- **`scripts/installer.nsi` 的 UTF-8 BOM 会被编辑器去掉**, 然后 makensis 报 `Bad text encoding: ...installer.nsi:1`。`buildInstaller()` 编译前会自动补 BOM, 但别的工具改完该文件后最好顺手确认一下。
 
 ### 6.3 服务生命周期
 - 桌面壳里**不要设 `HH_EXIT_WITH_UI=0`**: 它会把 `close-intent` 一起禁掉(`runtime-control.ts:84` 直接返回 disabled), 关窗时后端不退出, 壳只能硬杀。桌面壳保持默认, 由 `win.destroy()` 触发 unload 后的优雅关停。
@@ -318,6 +320,7 @@ npm run doctor              # 磁盘体检(只读); -- --clean 清测试库/孤�
 npm run pack                # 打包桌面版到 D:\1hobby\HarnessHub(会先 build); -- --skip-build 跳过构建; -- --no-electron 只打 Edge 版
 npm run pack -- --zip       # 额外产出 release\HarnessHub-<ver>-win-x64.zip(+ .sha256), 约 331 MB
 npm run pack -- --installer --sign=<证书指纹> --zip   # 全套: 签名两个 exe → 编并签名 NSIS 安装器 → 打 zip
+node scripts/make-icon.mjs  # 从 favicon.svg 重生成 icon.png / icon.ico(需要本机 Edge)
 
 # 验证桌面版(从 harness 里别用 Start-Process, 会卡在 ShellExecute)
 explorer.exe "D:\1hobby\HarnessHub\HarnessHub.exe"

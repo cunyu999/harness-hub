@@ -271,6 +271,7 @@ function createWindow(url) {
     minHeight: 680,
     backgroundColor: '#0b0d10',
     title: 'Harness Hub',
+    icon: path.join(__dirname, 'icon.png'),
     autoHideMenuBar: true,
     show: false,
     webPreferences: {

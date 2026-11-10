@@ -172,10 +172,14 @@ function buildInstaller() {
   // 把 TEMP 指到项目内就正常了。
   const tmp = path.join(root, '.local', 'tmp', 'nsis-tmp');
   mkdirSync(tmp, { recursive: true });
+  // NSIS 只认 UTF-8 BOM; edit 之类工具写文件会去 BOM, 每次编译前补齐。
+  const nsiPath = path.join(root, 'scripts', 'installer.nsi');
+  const nsiText = readFileSync(nsiPath, 'utf8');
+  if (!nsiText.startsWith('\uFEFF')) writeFileSync(nsiPath, `\uFEFF${nsiText}`, 'utf8');
   log(`编安装器: ${path.basename(setup)}`);
   const res = spawnSync(
     makensis,
-    ['/V2', `/DPKG_DIR=${outDir}`, `/DOUT_FILE=${setup}`, `/DAPP_VERSION=${pkg.version}`, path.join(root, 'scripts', 'installer.nsi')],
+    ['/V2', `/DPKG_DIR=${outDir}`, `/DOUT_FILE=${setup}`, `/DAPP_VERSION=${pkg.version}`, nsiPath],
     { stdio: 'inherit', env: { ...process.env, TEMP: tmp, TMP: tmp } },
   );
   if (res.error || res.status !== 0) {
@@ -359,6 +363,12 @@ if (wantElectron) {
     cpSync(desktopMain, path.join(outDir, 'resources', 'app', 'main.js'));
     cpSync(path.join(root, 'apps', 'desktop', 'package.json'), path.join(outDir, 'resources', 'app', 'package.json'));
 
+    // 图标: icon.png 给 BrowserWindow, icon.ico 给启动器/内核/安装器。
+    const iconPng = path.join(root, 'apps', 'desktop', 'assets', 'icon.png');
+    const iconIco = path.join(root, 'apps', 'desktop', 'assets', 'icon.ico');
+    if (!existsSync(iconIco)) log('缺少 apps/desktop/assets/icon.ico, 可先运行 node scripts/make-icon.mjs');
+    if (existsSync(iconPng)) cpSync(iconPng, path.join(outDir, 'resources', 'app', 'icon.png'));
+
     // 启动器: 双击 exe 带不了 --no-sandbox, 所以用系统自带的 .NET Framework csc 现编一个
     // 小的 WinExe 当门面(它顺手设 SetErrorMode + HH_ERROR_MODE)。没有 csc 就退回裸内核。
     const launcherSrc = path.join(root, 'apps', 'desktop', 'launcher.cs');
@@ -370,11 +380,16 @@ if (wantElectron) {
     let launcherOk = false;
     if (csc && existsSync(launcherSrc)) {
       log('编译启动器 HarnessHub.exe ...');
-      const built = spawnSync(
-        csc,
-        ['/nologo', '/codepage:65001', '/target:winexe', '/platform:anycpu', `/out:${path.join(outDir, 'HarnessHub.exe')}`, launcherSrc],
-        { cwd: root, stdio: 'inherit' },
-      );
+      const launcherArgs = [
+        '/nologo',
+        '/codepage:65001',
+        '/target:winexe',
+        '/platform:anycpu',
+        `/out:${path.join(outDir, 'HarnessHub.exe')}`,
+      ];
+      if (existsSync(iconIco)) launcherArgs.push(`/win32icon:${iconIco}`);
+      launcherArgs.push(launcherSrc);
+      const built = spawnSync(csc, launcherArgs, { cwd: root, stdio: 'inherit' });
       launcherOk = built.status === 0 && existsSync(path.join(outDir, 'HarnessHub.exe'));
     }
     if (!launcherOk) {
@@ -530,7 +545,34 @@ writeFileSync(
   'utf8',
 );
 
-// 8) 签名(可选) -> 安装器 -> 汇总 -> 打包。
+// 8) 图标/版本信息 -> 签名(可选) -> 安装器 -> 汇总 -> 打包。
+// Electron 内核是现成二进制, 用 rcedit 改图标与版本串; 没有 rcedit 就跳过(不致命)。
+const rcedit = [process.env.HH_RCEDIT, path.join(root, '.local', 'tools', 'rcedit', 'rcedit-x64.exe')]
+  .filter(Boolean)
+  .find((file) => existsSync(file));
+const iconIcoPath = path.join(root, 'apps', 'desktop', 'assets', 'icon.ico');
+if (desktopExe && rcedit && existsSync(iconIcoPath)) {
+  for (const exe of ['HarnessHubCore.exe', 'HarnessHub.exe']) {
+    const res = spawnSync(
+      rcedit,
+      [
+        path.join(outDir, exe),
+        '--set-icon', iconIcoPath,
+        '--set-file-version', pkg.version,
+        '--set-product-version', pkg.version,
+        '--set-version-string', 'FileDescription', 'Harness Hub',
+        '--set-version-string', 'ProductName', 'Harness Hub',
+        '--set-version-string', 'CompanyName', 'Harness Hub',
+        '--set-version-string', 'LegalCopyright', 'Copyright (c) 2026 Harness Hub',
+      ],
+      { stdio: 'ignore' },
+    );
+    if (res.status !== 0) log(`rcedit 处理 ${exe} 失败(exit ${res.status}), 图标可能仍是 Electron 默认`);
+  }
+} else if (desktopExe) {
+  log('没有 rcedit, 内核 exe 的图标保持 Electron 默认(启动器仍有图标)');
+}
+
 if (signThumb) {
   signFile(path.join(outDir, 'HarnessHub.exe'), signThumb);
   signFile(path.join(outDir, 'HarnessHubCore.exe'), signThumb);

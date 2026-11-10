@@ -3272,3 +3272,204 @@ table.grid tbody tr.rowclick:focus-visible { outline: 2px solid var(--accent); o
 .pf-mini { padding: 3px 9px; border: 1px solid var(--line-2); border-radius: 6px; background: transparent; color: var(--text-2); font-size: 12px; cursor: pointer; }
 .pf-mini:hover:not(:disabled) { color: var(--text); border-color: var(--accent-line); }
 .pf-mini:disabled { opacity: 0.6; cursor: default; }
+
+/* ------------------- 2026-11-10 品牌与首屏观感 ------------------- */
+
+/* 品牌图标: 与 favicon / 安装包同一套图形, 放在深色侧栏里带一点光晕。 */
+.brand-svg {
+  flex: none;
+  border-radius: 9px;
+  filter: drop-shadow(0 6px 14px rgba(11, 10, 20, 0.45));
+}
+
+/* 运行中的任务: 细窄的同色流动虚线(参考 lancer 的 running border, 纯 CSS, 不动 React)。 */
+.run-border {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  overflow: visible;
+}
+
+.run-border rect {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.2;
+  stroke-dasharray: 9 91;
+  opacity: 0.8;
+  animation: hh-run 3.6s linear infinite;
+  filter: drop-shadow(0 0 2px var(--accent-soft));
+}
+
+@keyframes hh-run {
+  to {
+    stroke-dashoffset: -100;
+  }
+}
+
+/* 空态: 一张带水印的引导卡, 让首屏有焦点而不是一段散文字。 */
+.empty-stage {
+  position: relative;
+  flex: 1;
+  display: grid;
+  place-items: center;
+  padding: 48px 24px;
+  overflow: hidden;
+}
+
+.empty-card {
+  position: relative;
+  width: min(460px, 100%);
+  padding: 4px 0;
+}
+
+.empty-watermark {
+  position: absolute;
+  right: -56px;
+  top: -78px;
+  opacity: 0.07;
+  transform: rotate(-9deg);
+  pointer-events: none;
+  user-select: none;
+}
+
+.empty-kicker {
+  font-size: 10.5px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-3);
+  margin-bottom: 10px;
+}
+
+.empty-title {
+  margin: 0 0 8px;
+  font-size: 19px;
+  font-weight: 620;
+  letter-spacing: -0.01em;
+  line-height: 1.35;
+}
+
+.empty-desc {
+  margin: 0;
+  max-width: 430px;
+  font-size: 12.5px;
+  line-height: 1.8;
+  color: var(--text-2);
+}
+
+.empty-features {
+  list-style: none;
+  margin: 18px 0 20px;
+  padding: 0;
+  display: grid;
+  gap: 9px;
+}
+
+.empty-features li {
+  display: flex;
+  gap: 9px;
+  align-items: flex-start;
+  font-size: 12px;
+  line-height: 1.65;
+  color: var(--text-2);
+}
+
+.empty-features svg {
+  flex: none;
+  margin-top: 3px;
+  color: var(--accent-2);
+}
+
+.empty-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* 主按钮加一道顶部高光, 悬停时轻微抬起, 和图标里的渐变呼应。 */
+.btn.primary {
+  background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.16), transparent 42%),
+    linear-gradient(180deg, var(--accent), color-mix(in oklab, var(--accent) 84%, black));
+}
+
+.btn.primary:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 24px var(--accent-soft);
+}
+
+/* 顶栏 tab 的下划线: 从中间长出来, 让切换有一点动态。 */
+.dock-tab {
+  position: relative;
+}
+
+.dock-tab.active::after {
+  content: '';
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: -1px;
+  height: 2px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  animation: hh-tab-in 220ms var(--ease) both;
+}
+
+@keyframes hh-tab-in {
+  from {
+    transform: scaleX(0.2);
+    opacity: 0;
+  }
+  to {
+    transform: scaleX(1);
+    opacity: 1;
+  }
+}
+
+::selection {
+  background: color-mix(in oklab, var(--accent) 38%, transparent);
+  color: var(--text);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .run-border rect {
+    animation: none;
+    stroke-dasharray: none;
+    opacity: 0.45;
+  }
+  .dock-tab.active::after {
+    animation: none;
+  }
+  .btn.primary:hover:not(:disabled) {
+    transform: none;
+  }
+}
+
+@media (max-width: 900px) {
+  .empty-watermark {
+    right: -30px;
+    top: -60px;
+    opacity: 0.05;
+  }
+}
+/* tab 只保留渐变下划线, 避免和原来的实线叠成两条。 */
+.dock-tab.active {
+  border-bottom-color: transparent;
+}
+/* 浅色下深色水印在纸面上偏"实", 收敛到几乎只是纹理。 */
+:root[data-theme='light'] .empty-watermark {
+  opacity: 0.045;
+}
+
+:root[data-theme='light'] .empty-stage {
+  background: radial-gradient(520px 240px at 62% 18%, color-mix(in oklab, var(--accent) 7%, transparent), transparent 70%);
+}
+/* 水印用径向遮罩把方形边缘化开, 看起来是光斑而不是贴纸。 */
+.empty-watermark {
+  -webkit-mask-image: radial-gradient(closest-side at 50% 46%, #000 26%, transparent 100%);
+  mask-image: radial-gradient(closest-side at 50% 46%, #000 26%, transparent 100%);
+}
+
+:root[data-theme='light'] .empty-watermark {
+  opacity: 0.06;
+}

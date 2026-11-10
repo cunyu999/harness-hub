@@ -19,6 +19,8 @@ Unicode true
 !define APP_NAME "Harness Hub"
 !define APP_EXE "HarnessHub.exe"
 !define UNINST_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\HarnessHub"
+!define MUI_ICON "..\apps\desktop\assets\icon.ico"
+!define MUI_UNICON "..\apps\desktop\assets\icon.ico"
 
 Name "${APP_NAME} ${APP_VERSION}"
 OutFile "${OUT_FILE}"
