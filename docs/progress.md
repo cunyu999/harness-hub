@@ -8,9 +8,13 @@
 - 两个坑: 该环境下 Edge 的 DevTools `/json/list` 对 Node 侧不稳定(Edge 明明在听), 所以不走 CDP; 用 `--window-size=16..256` 截图得到的帧**全透明**, 只有 512 正常 —— 改为只截 512 再缩放。
 - 接入: `apps/desktop/main.js` 的 BrowserWindow `icon`; 启动器 csc 加 `/win32icon`; 内核 exe 用 rcedit 写图标 + 版本串(没 rcedit 就跳过, 不致命); `scripts/installer.nsi` 的 `MUI_ICON` / `MUI_UNICON`。
 
+**追加: 空态不再放重复按钮(2026-11-10)**
+- 首屏引导卡里的 `新建任务` / `执行配置` 和左下角那组完全重复, 已删除; 卡片只留说明与特性, 文案里写清入口在左下角。
+- 顺带删掉不再使用的 `.empty-actions` 样式。
+
 **前端**
 - `apps/web/src/components/BrandMark.tsx`: 与 favicon 同几何的内联 SVG, `useId()` 生成唯一渐变 id, 侧栏 30px 与首屏水印 240px 共用。
-- 首屏空态: `.empty-stage` / `.empty-card` —— 大写字距 kicker、标题、一句说明、三条 ✓ 特性、`新建任务` + `执行配置 (N)` 两个按钮; 右上角水印用径向遮罩把方形边缘化开(浅色下 opacity 0.06, 不抢视线)。
+- 首屏空态: `.empty-stage` / `.empty-card` —— 大写字距 kicker、标题、一句说明、三条 ✓ 特性; **不放操作按钮**(入口只有左下角那一组, 避免重复功能), 文案里指向「新建任务」; 右上角水印用径向遮罩把方形边缘化开(浅色下 opacity 0.06, 不抢视线)。
 - 运行态: 非终态任务行叠一层 SVG `rect`, `stroke-dasharray: 9 91` + `hh-run 3.6s linear infinite` 的流动虚线(参考 lancer 的 running border), `prefers-reduced-motion` 下停动画。
 - 细节: 主按钮顶部高光 + hover 轻抬; `.dock-tab.active` 改成渐变下划线(原实线 border 置透明), 切换时从中间展开; `::selection` 用品牌色; 浅色空态加一层很淡的 accent 光晕。
 

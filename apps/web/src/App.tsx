@@ -396,7 +396,7 @@ export function App() {
                   <div className="empty-kicker">Harness Hub</div>
                   <h2 className="empty-title">统一工作台</h2>
                   <p className="empty-desc">
-                    新建一个任务, 选好主控与执行者。之后协作图只画真实事件: 会话连接、工具调用、审批、审核与交付。
+                    新建一个任务, 选好主控与执行者; 入口在左下角「新建任务」。之后协作图只画真实事件: 会话连接、工具调用、审批、审核与交付。
                   </p>
                   <ul className="empty-features">
                     {[
@@ -412,14 +412,6 @@ export function App() {
                       </li>
                     ))}
                   </ul>
-                  <div className="empty-actions">
-                    <button className="btn primary" onClick={() => setShowNew(true)}>
-                      新建任务
-                    </button>
-                    <button className="btn" onClick={() => setShowProfiles(true)}>
-                      执行配置 ({profiles.filter((p) => p.enabled).length})
-                    </button>
-                  </div>
                 </div>
               </div>
             )}

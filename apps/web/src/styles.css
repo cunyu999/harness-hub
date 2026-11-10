@@ -3381,12 +3381,6 @@ table.grid tbody tr.rowclick:focus-visible { outline: 2px solid var(--accent); o
   color: var(--accent-2);
 }
 
-.empty-actions {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
 /* 主按钮加一道顶部高光, 悬停时轻微抬起, 和图标里的渐变呼应。 */
 .btn.primary {
   background-image: linear-gradient(180deg, rgba(255, 255, 255, 0.16), transparent 42%),
