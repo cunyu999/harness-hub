@@ -202,6 +202,7 @@ git status --porcelain        # 应为空
 - **从 harness 里用 `Start-Process` / `WScript.Shell.Run` 直接起 `HarnessHub.exe` 会卡住**(ShellExecute 路径); 验证桌面版用 `explorer.exe "<exe>"` 或 `Invoke-CimMethod Win32_Process Create`。
 - Electron 窗口在后台启动时可能被系统按最小化创建; `ready-to-show` 里 `isMinimized()` 时补一次 `restore()+focus()`。
 - **在 `D:\1hobby` 里直接运行任何 exe, 拿到的是低完整性令牌**(`whoami /groups` 显示 `Mandatory Label\Low Mandatory Level`, 而正常 pwsh 是 High)。低完整性对 `HKCU\Software` 只读, 于是 NSIS 的 `WriteRegStr` 和 `reg.exe add` 都报 `拒绝访问`。**验证安装器/桌面壳要把 exe 放到 `%TEMP%`、Downloads 这类工作区外的路径再跑**: 同一份 setup 从 `%TEMP%` 跑, 卸载键、`data\tmp`、卸载删除全部正常。别把它误判成产品缺陷。
+- **codex 的 `--version` 也会在 home 下建 `tmp/arg0-*` 目录**: `detect.ts` 探测版本时把 `CODEX_HOME` / `CLAUDE_CONFIG_DIR` / `DSH_HOME` 指到 `<数据目录>/tmp/detect/...`, 否则每点一次「执行配置」都会在 `~/.codex` 里留垃圾。
 
 ### 6.3 服务生命周期
 - 桌面壳里**不要设 `HH_EXIT_WITH_UI=0`**: 它会把 `close-intent` 一起禁掉(`runtime-control.ts:84` 直接返回 disabled), 关窗时后端不退出, 壳只能硬杀。桌面壳保持默认, 由 `win.destroy()` 触发 unload 后的优雅关停。

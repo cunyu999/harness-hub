@@ -3,14 +3,15 @@
 用户要求: 打开某份执行配置时, 若本机装了对应的 harness, 就在表单里给一个内联的「已检测到 X, 是否使用」; 点了自动回填; 没检测到就不显示; 不弹窗、不打扰; codex / claude / dsh 各自独立。
 
 **实现**
-- `apps/server/src/detect.ts`: 依次在 PATH(`whichSync`, 走 PATHEXT 认 `.cmd`/`.ps1` 垫片)、项目内 `.local/tools/node_modules/.bin`、npm 全局(`%APPDATA%\npm`)找命令; `--version` 取版本(8s 超时, 失败不影响"已检测到"); 默认凭据目录(`~/.codex`、`~/.claude`、`~/.dsh`)存在才给。结果按适配器缓存 30s。
+- `apps/server/src/detect.ts`: 依次在 PATH(`whichSync`, 走 PATHEXT 认 `.cmd`/`.ps1` 垫片)、项目内 `.local/tools/node_modules/.bin`、npm 全局(`%APPDATA%\npm`)找命令; `--version` 取版本(8s 超时, 失败不影响"已检测到"); 默认凭据目录(`~/.codex`、`~/.claude`、`~/.dsh`)存在才给。结果按适配器缓存 30s。跑 `--version` 时把该 harness 的 home 指到 `<数据目录>/tmp/detect/<env 名>`, 因为 codex 的 `--version` 会在 home 的 `tmp/` 下建 `arg0-*` 目录; 不隔离就会写到用户主目录。
 - 接口: `GET /api/detect/:adapterId` → `DetectResultDto`(契约在 `packages/contracts/src/api.ts`, 路由与处理在 `apps/server/src/http.ts`)。
 - 前端 `apps/web/src/components/Dialogs.tsx`: 选中配置/新建时静默探测当前适配器; 命中且与输入框不同时显示 chip 按钮「已检测到 Codex 0.166.0, 是否使用?」; 点击回填 `executableRef`, 只在用户没填时补 `sourceHome`。样式在 `apps/web/src/styles.css` 的 `.pf-detect`。
 
 **验证**
 - `npm run typecheck`、`npm run typecheck:web`、`npm run build:web` 通过。
 - 用隔离数据目录起服务打接口: codex → `E:\nodejs\node_global\codex.cmd`(0.166.0, `~/.codex`); claude-code → `claude.cmd`(2.1.318, `~/.claude`); dsh → `.local\tools\node_modules\.bin\dsh.cmd`(0.2.1-rc.5, `~/.dsh`); mock → `found:false`。
-- 未做界面点击验证, 留待手动确认。
+- 界面点击验证(headless Edge + CDP): 打开「执行配置」后, Codex / Claude Code / DeepSeek Harness 三份配置分别出现 `已检测到 Codex 0.166.0, 是否使用?`、`已检测到 Claude Code 2.1.318, 是否使用?`、`已检测到 DeepSeek Harness 0.2.1-rc.5, 是否使用?`; 逐个点击后输入框分别变为 `E:\nodejs\node_global\codex.cmd`、`claude.cmd`、`.local\tools\node_modules\.bin\dsh.cmd`, chip 随即消失, 互不影响。
+- 打包版复测: WMI 启动 `HarnessHub.exe` 后 `GET /api/detect/codex` 返回 found/0.166.0; 临时探针目录落在 `data\tmp\detect\codex_home`, 用户主目录与 `~/.codex/tmp` 没有新增; 关窗 exit 0。
 
 ## 2026-11-10 数据全收进安装目录 + 「低完整性」这个坑
 

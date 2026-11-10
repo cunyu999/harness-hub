@@ -392,7 +392,7 @@ export class ApiServer {
 
   /** 只读探测本机是否装了某个 harness; 前端在配置表单里据此显示内联的「是否使用」。 */
   private detectAdapter(ctx: Ctx) {
-    return detectHarness(ctx.params.adapterId as AdapterId, this.cfg.root);
+    return detectHarness(ctx.params.adapterId as AdapterId, this.cfg.root, this.cfg.localDir);
   }
 
   private listProfiles(): ProfileDto[] {
