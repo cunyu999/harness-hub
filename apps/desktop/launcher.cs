@@ -40,12 +40,33 @@ internal static class Program
             arguments.Append(Quote(args[i]));
         }
 
+        // 临时目录也收进安装目录: Chromium 与后面的 harness 子进程(含 node)都继承
+        // TEMP/TMP, 免得运行时在 %LOCALAPPDATA%\Temp 留东西。建不出来就退回系统默认,
+        // 但至少记一笔。
+        string tmp = Path.Combine(dir, "data", "tmp");
+        bool tmpReady = false;
+        try
+        {
+            Directory.CreateDirectory(tmp);
+            tmpReady = true;
+        }
+        catch (Exception ex)
+        {
+            WriteLog(dir, "创建 data/tmp 失败, 退回系统 TEMP: " + ex.Message);
+        }
+
         try
         {
             ProcessStartInfo psi = new ProcessStartInfo(core, arguments.ToString());
             psi.UseShellExecute = false;
             psi.WorkingDirectory = dir;
             psi.EnvironmentVariables["HH_ERROR_MODE"] = "1";
+            if (tmpReady)
+            {
+                psi.EnvironmentVariables["TEMP"] = tmp;
+                psi.EnvironmentVariables["TMP"] = tmp;
+                psi.EnvironmentVariables["TMPDIR"] = tmp;
+            }
             // 从被 Electron 宿主继承来的环境里去掉这个开关, 否则内核会以纯 Node 模式跑
             psi.EnvironmentVariables.Remove("ELECTRON_RUN_AS_NODE");
             Process.Start(psi);

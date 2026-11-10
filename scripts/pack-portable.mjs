@@ -546,7 +546,10 @@ if (wantInstaller) {
 const total = dirSize(outDir);
 const programBytes = readdirSync(outDir)
   .filter((name) => name !== 'data')
-  .reduce((sum, name) => sum + dirSize(path.join(outDir, name)).bytes, 0);
+  .reduce((sum, name) => {
+    const full = path.join(outDir, name);
+    return sum + (statSync(full).isDirectory() ? dirSize(full).bytes : statSync(full).size);
+  }, 0);
 log(`完成: ${(programBytes / 1024 / 1024).toFixed(1)} MB 程序文件(${total.files} 个文件含 data)`);
 log(`双击 ${path.join(outDir, desktopExe ? 'HarnessHub.exe' : 'HarnessHub-Edge.vbs')} 启动`);
 if (wantZip) makeZip();

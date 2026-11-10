@@ -142,6 +142,9 @@ git status --porcelain        # 应为空
 - 签名: 自签名证书 `CN=Harness Hub, O=1hobby, OU=Local Build`(指纹 `501A7EE97BB27F0EDAC77AEB32D83EF976702C6D`, 2029-11 到期; pfx/cer 在 `.local/keys/`, 口令在 `pfx-password.txt`)。`Set-AuthenticodeSignature` 会返回 `UnknownError`(UntrustedRoot), 但签名确实写入; 别人机器上仍显示"未知发布者", 除非先把 `.cer` 装进「受信任的根证书」。
 - 打安装包的坑: `scripts/installer.nsi` 必须存成 UTF-8 **带 BOM**(否则 `Bad text encoding`); 只能 `SetCompressor zlib` 并把 `TEMP`/`TMP` 指到项目内(`.local/tmp`), 否则 32 位 makensis 在 300 MB 负载上报 `Internal compiler error #12345: error creating mmap`; makensis 用 `.local/tools/nsis/nsis-3.10/Bin/makensis.exe`(可用 `HH_MAKENSIS` 覆盖)。
 - 实测过的安装链路: 静默安装 `/S /D=<dir>` 19 秒 → 启动 → 关窗(server exit 0, `runtime.json` 删除)→ `Uninstall.exe /S` 后只剩 `data/`(数据库保留)。
+- **数据全部收进安装目录**(2026-11-10): 启动器启动前建 `data\tmp`, 并把 `TEMP`/`TMP`/`TMPDIR` 指过去 —— Electron、后端、harness 子进程都继承, 不在系统 `%TEMP%` 留文件; 崩溃转储也改到 `data\electron\Crashpad` 并加 `disable-crash-reporter`(否则崩一次就在 `%LOCALAPPDATA%\CrashDumps` 留 `.dmp`)。实测: 删 `data` 后启动 → 全盘扫 `%USERPROFILE%`/`%LOCALAPPDATA%`/`%APPDATA%`/`%TEMP%`(3 层) 新增文件 181 个, 逐个归属全是其它程序(MATLAB、抖音、Edge 临时 profile 等), 没有一个是本程序的。
+- 「应用和功能」条目: 安装器装时写 HKCU 卸载键; 桌面壳启动时若同目录有 `Uninstall.exe` 再用 `reg.exe ... /reg:32` 补写一次(补齐 `InstallLocation`/`QuietUninstallString`, 并兜住安装器写失败或用户手动搬目录的情况)。zip 绿色版没有 `Uninstall.exe`, 不写任何注册表。
+- 开始菜单/桌面快捷方式改成安装器的可选组件(`Section /o`, 默认不勾), 需要才装。
 
 ---
 
@@ -198,6 +201,7 @@ git status --porcelain        # 应为空
 - **node 用管道 stdio 拉起 `scripts/start.ps1` 时 `Add-Type` 会抛 `Win32Exception`**(start.ps1:14), 后端 code=1 退出; 单独在控制台跑同一个 ps1 却成功。桌面壳直接传 `HH_ERROR_MODE=1` 跳过这次重启。
 - **从 harness 里用 `Start-Process` / `WScript.Shell.Run` 直接起 `HarnessHub.exe` 会卡住**(ShellExecute 路径); 验证桌面版用 `explorer.exe "<exe>"` 或 `Invoke-CimMethod Win32_Process Create`。
 - Electron 窗口在后台启动时可能被系统按最小化创建; `ready-to-show` 里 `isMinimized()` 时补一次 `restore()+focus()`。
+- **在 `D:\1hobby` 里直接运行任何 exe, 拿到的是低完整性令牌**(`whoami /groups` 显示 `Mandatory Label\Low Mandatory Level`, 而正常 pwsh 是 High)。低完整性对 `HKCU\Software` 只读, 于是 NSIS 的 `WriteRegStr` 和 `reg.exe add` 都报 `拒绝访问`。**验证安装器/桌面壳要把 exe 放到 `%TEMP%`、Downloads 这类工作区外的路径再跑**: 同一份 setup 从 `%TEMP%` 跑, 卸载键、`data\tmp`、卸载删除全部正常。别把它误判成产品缺陷。
 
 ### 6.3 服务生命周期
 - 桌面壳里**不要设 `HH_EXIT_WITH_UI=0`**: 它会把 `close-intent` 一起禁掉(`runtime-control.ts:84` 直接返回 disabled), 关窗时后端不退出, 壳只能硬杀。桌面壳保持默认, 由 `win.destroy()` 触发 unload 后的优雅关停。
@@ -351,6 +355,7 @@ curl http://127.0.0.1:4310/api/runtime      # 看 exitOnUiClose / pageSeen
 - **桌面版必须带 `--no-sandbox`**: 这台机器上 Chromium 沙箱初始化会让 Electron 在 ready 前 `0xC0000005`, 所以由启动器固定传参; 若哪天换到正常机器, 这个参数仍可用, 但等于放弃了渲染进程沙箱。
 - **桌面版体积 808 MB**, 发行 zip 330.6 MB / 安装器 327.8 MB; 已用自签名证书签名(别人机器仍报"未知发布者"); 无自动更新、无托盘/最小化到托盘。silent 安装可用 `/S /D=<dir>`。
 - **便携版体积 460 MB**(仅 Edge 版), 其中 SDK vendor 343 MB; 想瘦身要先确认 SDK 是否真的需要 vendor 里的 CLI 副本。
+- **安装器的卸载键是从安装器/桌面壳写 HKCU**: 在本项目工作区 `D:\1hobby` 里直接跑 exe 会被降为低完整性令牌, 写注册表一律 `拒绝访问`(见 §6.2 最后一条), 这属于测试环境限制, 不是产品缺陷; 真实验证请把 setup 复制到 `%TEMP%` 或 Downloads 再跑。
 
 ---
 

@@ -34,6 +34,7 @@ ShowInstDetails show
 !define MUI_FINISHPAGE_RUN "$INSTDIR\${APP_EXE}"
 !define MUI_FINISHPAGE_RUN_TEXT "启动 Harness Hub"
 !insertmacro MUI_PAGE_WELCOME
+!insertmacro MUI_PAGE_COMPONENTS
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_INSTFILES
 !insertmacro MUI_PAGE_FINISH
@@ -41,6 +42,7 @@ ShowInstDetails show
 !insertmacro MUI_UNPAGE_INSTFILES
 !insertmacro MUI_LANGUAGE "SimpChinese"
 !insertmacro MUI_LANGUAGE "English"
+
 
 Function .onInit
   IfFileExists "$INSTDIR\data\runtime.json" 0 initDone
@@ -55,15 +57,11 @@ Function .onInit
   initDone:
 FunctionEnd
 
-Section "Install"
+Section "程序文件" SEC_CORE
+  SectionIn RO
   SetOutPath "$INSTDIR"
   File /r /x data "${PKG_DIR}\*.*"
   WriteUninstaller "$INSTDIR\Uninstall.exe"
-
-  CreateDirectory "$SMPROGRAMS\Harness Hub"
-  CreateShortcut "$SMPROGRAMS\Harness Hub\Harness Hub.lnk" "$INSTDIR\${APP_EXE}" "" "$INSTDIR\${APP_EXE}" 0
-  CreateShortcut "$SMPROGRAMS\Harness Hub\卸载 Harness Hub.lnk" "$INSTDIR\Uninstall.exe"
-  CreateShortcut "$DESKTOP\Harness Hub.lnk" "$INSTDIR\${APP_EXE}" "" "$INSTDIR\${APP_EXE}" 0
 
   WriteRegStr HKCU "${UNINST_KEY}" "DisplayName" "${APP_NAME}"
   WriteRegStr HKCU "${UNINST_KEY}" "DisplayVersion" "${APP_VERSION}"
@@ -73,6 +71,14 @@ Section "Install"
   WriteRegStr HKCU "${UNINST_KEY}" "UninstallString" '"$INSTDIR\Uninstall.exe"'
   WriteRegDWORD HKCU "${UNINST_KEY}" "NoModify" 1
   WriteRegDWORD HKCU "${UNINST_KEY}" "NoRepair" 1
+SectionEnd
+
+; 可选: 不需要任何外部痕迹时取消勾选, 直接打开 exe 即可(作用等同绿色版)。
+Section /o "快捷方式" SEC_SHORTCUTS
+  CreateDirectory "$SMPROGRAMS\Harness Hub"
+  CreateShortcut "$SMPROGRAMS\Harness Hub\Harness Hub.lnk" "$INSTDIR\${APP_EXE}" "" "$INSTDIR\${APP_EXE}" 0
+  CreateShortcut "$SMPROGRAMS\Harness Hub\卸载 Harness Hub.lnk" "$INSTDIR\Uninstall.exe"
+  CreateShortcut "$DESKTOP\Harness Hub.lnk" "$INSTDIR\${APP_EXE}" "" "$INSTDIR\${APP_EXE}" 0
 SectionEnd
 
 Function un.onInit
@@ -119,3 +125,9 @@ Section "Uninstall"
   ; data\ 还在时这里不会生效, 用户数据因此得以保留。
   RMDir "$INSTDIR"
 SectionEnd
+
+; 描述块放在 Section 之后: NSIS 宏是按顺序展开的, 在 Section 定义前引用 ${SEC_*} 会报 warning 6000。
+!insertmacro MUI_FUNCTION_DESCRIPTION_BEGIN
+!insertmacro MUI_DESCRIPTION_TEXT ${SEC_CORE} "程序文件(必需)。用户数据都会放在安装目录的 data\ 下。"
+!insertmacro MUI_DESCRIPTION_TEXT ${SEC_SHORTCUTS} "可选: 在开始菜单与桌面创建快捷方式。默认不勾选, 不勾则不在安装目录之外留任何文件。"
+!insertmacro MUI_FUNCTION_DESCRIPTION_END

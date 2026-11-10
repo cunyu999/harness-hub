@@ -49,6 +49,13 @@ let forceClose = false;
 // Electron 自己的缓存也放进 data, 不在用户 AppData 里留第二份。
 // 必须在 app ready 之前设置, 所以放在模块顶层。
 app.setPath('userData', path.join(DATA_DIR, 'electron'));
+// 崩溃转储同样收进 data: 否则进程崩掉时会在 %LOCALAPPDATA%\CrashDumps 留 .dmp。
+try {
+  app.setPath('crashDumps', path.join(DATA_DIR, 'electron', 'Crashpad'));
+} catch {
+  /* 老版本 Electron 没有这个 path, 忽略 */
+}
+app.commandLine.appendSwitch('disable-crash-reporter');
 boot('userData set: ' + path.join(DATA_DIR, 'electron'));
 
 /** 桌面壳自己的日志: 后端起不来时至少有一份现场。 */
@@ -305,6 +312,49 @@ function createWindow(url) {
   void win.loadURL(url);
 }
 
+const UNINSTALL_KEY = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\HarnessHub';
+
+/**
+ * 安装版(同目录有 Uninstall.exe)才登记「应用和功能」条目; 绿色版(zip 解压)不写任何注册表。
+ * 走 32 位注册表视图, 与 NSIS 卸载脚本的 DeleteRegKey 对齐, 卸载时能一起清掉。
+ */
+function registerUninstallEntry() {
+  const uninstaller = path.join(APP_ROOT, 'Uninstall.exe');
+  if (!fs.existsSync(uninstaller)) return;
+
+  let version = '0.1.0';
+  try {
+    const pkg = JSON.parse(fs.readFileSync(path.join(APP_ROOT, 'resources', 'app', 'package.json'), 'utf8'));
+    if (typeof pkg.version === 'string' && pkg.version) version = pkg.version;
+  } catch {
+    /* 读不到就用默认版本 */
+  }
+
+  const values = [
+    ['DisplayName', 'Harness Hub'],
+    ['DisplayVersion', version],
+    ['Publisher', '1hobby'],
+    ['InstallLocation', APP_ROOT],
+    ['DisplayIcon', path.join(APP_ROOT, 'HarnessHub.exe')],
+    ['UninstallString', `"${uninstaller}"`],
+    ['QuietUninstallString', `"${uninstaller}" /S`],
+    ['NoModify', '1', 'REG_DWORD'],
+    ['NoRepair', '1', 'REG_DWORD'],
+  ];
+  for (const [name, data, type] of values) {
+    const res = spawnSync(
+      'reg.exe',
+      ['add', UNINSTALL_KEY, '/v', name, '/t', type ?? 'REG_SZ', '/d', data, '/f', '/reg:32'],
+      { windowsHide: true, stdio: 'ignore' },
+    );
+    if (res.error || res.status !== 0) {
+      log(`写卸载注册表项失败(${name}): ${res.error?.message ?? `exit ${res.status}`}`);
+      return;
+    }
+  }
+  log(`已登记卸载信息: ${UNINSTALL_KEY}`);
+}
+
 async function main() {
   boot('main() start');
   Menu.setApplicationMenu(null);
@@ -319,6 +369,11 @@ async function main() {
   backendPort = port;
   log(`后端就绪: http://127.0.0.1:${port}`);
   createWindow(`http://127.0.0.1:${port}/`);
+  try {
+    registerUninstallEntry();
+  } catch (err) {
+    log(`登记卸载信息失败: ${err instanceof Error ? err.message : String(err)}`);
+  }
 }
 
 // 单实例: 第二次双击只把已有窗口拉到前台

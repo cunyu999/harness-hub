@@ -1,3 +1,22 @@
+## 2026-11-10 数据全收进安装目录 + 「低完整性」这个坑
+
+用户问"能不能所有东西(含数据、缓存)都只放在安装目录"。审计结论: 程序自身早已如此, 剩下的外部痕迹只有快捷方式、卸载注册表项、安装瞬间的 `%TEMP%`。
+
+**已改**
+- `apps/desktop/launcher.cs`: 启动前建 `data\tmp`, 把 `TEMP`/`TMP`/`TMPDIR` 指过去(Electron → 后端 → harness 子进程整条链继承)。
+- `apps/desktop/main.js`: 崩溃转储改到 `data\electron\Crashpad` + `disable-crash-reporter`; 启动时如果同目录有 `Uninstall.exe`, 用 `reg.exe ... /reg:32` 补写 HKCU 卸载键(补 `InstallLocation`/`QuietUninstallString`; zip 绿色版没有 Uninstall.exe, 不写)。
+- `scripts/installer.nsi`: 开始菜单/桌面快捷方式改成可选组件(`Section /o`, 默认不勾)。
+
+**审计方法与结果**
+- 删 `data` → 启动 → 关窗 → 扫 `%USERPROFILE%`、`%LOCALAPPDATA%`、`%APPDATA%`、`%TEMP%`(深度 3) 中此刻之后修改、且不在安装目录的文件: 181 个, 逐个归属后全是别的程序(MATLAB、抖音、Edge 临时 profile 等), 没有一个来自本程序。
+- `data\electron` 里已经有 Chromium 的 Cache/GPUCache/Local Storage/Network/Preferences; `%LOCALAPPDATA%\Harness Hub` 之类目录不存在; 卸载后注册表、开始菜单、桌面 lnk 都干净。
+
+**坑: 工作区里的 exe 是低完整性**
+- 现象: 静默安装后 HKCU 卸载键始终没有; 桌面壳补写也失败, `reg.exe` 返回 `错误: 拒绝访问。`。
+- 定位: `whoami /groups` 显示 **从 `D:\1hobby` 里运行的 exe 拿到 `Mandatory Label\Low Mandatory Level`**(正常 pwsh 是 High); 把同一个 `node.exe`/`reg.exe` 复制到 `%TEMP%` 跑就正常。低完整性对 `HKCU\Software` 只读, 所以 NSIS 的 `WriteRegStr` 和 `reg.exe add` 一起失败 —— 和产品代码无关。
+- 复测: 把 setup 复制到 `%TEMP%` 再静默安装 → 卸载键立刻出现; 启动后补写的 `InstallLocation` 也在; 关窗干净退出; `Uninstall.exe /S` 后注册表项删除、程序文件清空、`data\` 保留。
+- 结论: 验证安装器/桌面壳必须从工作区外(`%TEMP%`、Downloads)跑; 这一点已记进 `work.md` §6.2/§9。
+
 ## 2026-11-10 发行包: 自签名 + NSIS 安装器 + zip + sha256
 
 在桌面版跑通之后补齐"能发给别人"的那一层。三步都在本机实测。
