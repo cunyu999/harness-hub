@@ -160,10 +160,11 @@ const a = await evaluate(`(async () => {
   out.cards = document.querySelectorAll('.cy-card').length;
   out.planGrid = !!document.querySelector('table.plan-grid');
   out.themeBefore = document.documentElement.dataset.theme;
-  document.querySelector('.icon-btn')?.click();
+  // 头部有两个图标按钮(通知铃铛在前), 按标题选主题那个
+  document.querySelector('button[title^="切换到"]')?.click();
   await sleep(300);
   out.themeAfter = document.documentElement.dataset.theme;
-  document.querySelector('.icon-btn')?.click();
+  document.querySelector('button[title^="切换到"]')?.click();
   await sleep(200);
 
   [...document.querySelectorAll('.dock-tab')].find((b) => (b.textContent || '').includes('事件'))?.click();
@@ -281,6 +282,9 @@ else {
 }
 
 /* -------------------- Pass D: 归档面板(只看不删) -------------------- */
+// 归档面板要有条目可看: 先把已完成的任务删掉(删除会把它移进归档), 再打开面板。
+await j('DELETE', `/api/tasks/${runTask}`);
+await sleep(400);
 const d = await evaluate(`(async () => {
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
   const out = {};

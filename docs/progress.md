@@ -1,3 +1,20 @@
+## 2026-11-12 全量回归(UI + 功能 + 真实 Claude 任务)
+
+按用户要求做一次全量测试: 覆盖界面设计与实际功能, 发现问题就修, 修完复测。
+
+**测试结果(全新隔离库 + 最终产物)**
+- 单元/集成: `npm test` 72/72(20 s)。
+- 接口验收: `scripts/acceptance-api.mjs` 53/53。
+- 界面验收: `scripts/acceptance-ui.mjs` 28/28。
+- 视觉/响应式巡检 `.local/tmp/visual-audit.mjs`(CDP): 13/13 —— 空态无重复按钮、品牌标为 SVG、顶栏按钮都有 title、1440 与 1024 无横向溢出、执行配置有「检测本机 / 指定文件夹检索」两个小按钮、命中条 `检测到 Codex 0.166.0 ✓ ✗`、点 ✓ 回填路径且条消失、1024 新建任务弹窗无溢出、按钮可聚焦且有 outline。
+- 运行期错误巡检 `.local/tmp/console-audit.mjs`: 切主题、开关三个弹窗、切六个标签, console error / 未捕获异常 / 失败请求均为 0。
+- 真实任务(只跑 Claude, 不跑 Codex): `HH_LIVE_LEAD=claude-code HH_LIVE_WORKER=claude-code node scripts/acceptance-live.mjs` → 9/9, 2 个工作项、3 个产物、`check.txt` 内容一致, 用量 270k tokens / 6 回合(极简任务)。
+
+**修掉的问题**
+- `scripts/acceptance-ui.mjs` 主题选择器点到了新加的通知铃铛(第一个 `.icon-btn`), 改成 `button[title^="切换到"]`; 归档用例在全新库上没有条目, 改成先 `DELETE /api/tasks/:id` 让任务进归档再断言。
+- `apps/web/src/styles.css`: 1180px 以下侧栏 220px 时品牌区被铃铛/主题按钮挤压, 「Harness Hub」折成两行、副标题折成三行。改成名字/副标题单行省略、1180 以下隐藏副标题、缩小 `.icon-btn` 到 27px 与品牌区间距, 1024 下名字完整显示。
+
+**隔离方式**: `HH_DATA_DIR=.local/tmp/finaltest-data`、`HH_PORT=4390`、`HH_EXIT_WITH_UI=0`、`HH_ERROR_MODE=1`; `acceptance-api.mjs` 要显式传 `HH_DATA_DIR`, 否则它 spawn 的第二个实例会用真实 `.local/data` 起在 4311, 导致 A4「单实例锁」用例失败。
 ## 2026-11-10 「未检测到本机安装的 X」提示
 
 用户反馈: 自动检测没命中时界面上什么也没有, 分不清是"没装"还是"还在探测"。

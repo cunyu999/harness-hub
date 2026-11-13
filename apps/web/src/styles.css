@@ -3469,3 +3469,41 @@ table.grid tbody tr.rowclick:focus-visible { outline: 2px solid var(--accent); o
 :root[data-theme='light'] .empty-watermark {
   opacity: 0.06;
 }
+/* 窄窗口下品牌区不再把名字挤成两行: 名字单行省略, 副标题在 1180 以下收起。 */
+.brand-text {
+  flex: 1 1 auto;
+}
+.brand-name,
+.brand-sub {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@media (max-width: 1180px) {
+  .brand {
+    padding: 16px 14px 12px;
+    gap: 9px;
+  }
+
+  .brand-sub {
+    display: none;
+  }
+}
+/* 220px 侧栏里给品牌名留出空间: 缩小图标按钮与字号, 避免截断成省略号。 */
+@media (max-width: 1180px) {
+  .brand {
+    padding: 14px 12px 12px;
+    gap: 8px;
+  }
+
+  .brand-name {
+    font-size: 12.5px;
+  }
+
+  .brand .icon-btn {
+    width: 27px;
+    height: 27px;
+    border-radius: 8px;
+  }
+}
