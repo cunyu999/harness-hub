@@ -1,3 +1,25 @@
+## 2026-11-13 运行态呼吸灯 + 常驻 harness 连线
+
+用户要求: 运行中任务行不要流动虚线, 换成**呼吸灯**且可自由开关; 但画布上 harness 之间的连线要像参考图那样常驻、整齐美观, 开关不影响连线。
+
+**任务行呼吸灯**
+- `apps/web/src/App.tsx`: 去掉 `.run-border` 的 SVG 虚线框, 改为任务行 meta 里一颗 `.task-live` 小灯(仅在非终态出现)。
+- 新增 `apps/web/src/lib/effects.ts`: `hh.effects` 存 localStorage, 模块加载时写 `documentElement.dataset.effects`; `useEffects()` 订阅变更, `toggleEffects()` 切换。
+- 侧栏底部连接状态旁新增「呼吸灯」开关(`.fx-btn`, `aria-pressed`), 关闭后只停呼吸动画、保留静态小点; 刷新页面保持选择。
+- `apps/web/src/styles.css`: `.task-live` 用 `hh-breathe`(2.4s)做双环扩散; `:root[data-effects='off'] .task-live` 与 `prefers-reduced-motion` 都退化为静态点。
+
+**画布连线(常驻)**
+- `apps/web/src/components/CollabGraph.tsx`: 连线改为**始终渲染**(不再只在运行中才亮); 未激活时也是细虚线 + 箭头, 激活时提亮并流动。
+- 端点分布: 主控卡底边按席位序号均分出口(`From.x + From.w*(i+1)/(n+1)`), 席位卡顶边中点进入; 席位 → 交付卡按序号均分落点, 两条线不再挤在一点。
+- 单席位任务没有其它席位时补一条 主控 → 交付 的连线, 保证图在任何任务形态下都是连通的。
+- 箭头用 `<marker>` + `fill="context-stroke"`, 颜色自动跟随每条线的席位色; `cy-dash` 周期改成 22(与 `6 5` 的 dash 周期对齐), 流动不跳帧。
+- 侧栏列表: 选中任务的 `lifecycle/phase/version` 变化时立刻 `reloadTasks()`, 不用等 4s 轮询。
+
+**验证**
+- `npm run typecheck` / `typecheck:web` / `build:web` 通过。
+- CDP 实测: 初始 `data-effects=on`、`animationName=hh-breathe`; 点开关后 `off` / `none`; 关闭状态画布仍有 2 条 `.cy-wire-path`; 再点回来恢复动画。
+- `npm test` 72/72; `scripts/acceptance-api.mjs` 53/53; `scripts/acceptance-ui.mjs` 28/28。
+- 打包后 WMI 冒烟: health ok, 关窗 exit 0。
 ## 2026-11-12 全量回归(UI + 功能 + 真实 Claude 任务)
 
 按用户要求做一次全量测试: 覆盖界面设计与实际功能, 发现问题就修, 修完复测。

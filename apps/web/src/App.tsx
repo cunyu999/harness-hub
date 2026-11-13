@@ -10,6 +10,7 @@ import { Conversation } from './components/Conversation';
 import { ArchivePanel, NewTaskDialog, ProfilesPanel } from './components/Dialogs';
 import { LIFECYCLE_LABEL, LIFECYCLE_TONE, PHASES, PHASE_LABEL, clock, shortId, tokenParts, tokens } from './lib/format';
 import { useTheme } from './lib/theme';
+import { toggleEffects, useEffects } from './lib/effects';
 import { usePageLifecycle } from './lib/runtime';
 import { notificationState, notify, requestNotificationPermission, setTitleBadge, type NotifyState } from './lib/notify';
 
@@ -107,6 +108,7 @@ export function App() {
   };
   const state = useTask(taskId);
   const { theme, toggle: toggleTheme } = useTheme();
+  const effects = useEffects();
   const { status: runtimeStatus } = usePageLifecycle();
 
   const loadProfiles = useCallback(() => {
@@ -167,6 +169,12 @@ export function App() {
     }
     prevAttention.current = { taskId: id, approvals: pendingCount, plan: awaitingPlan };
   }, [detail, pendingCount, awaitingPlan]);
+
+  /** 选中的任务状态一变(例如刚开始跑或刚落终态), 立刻同步侧栏那一行, 不等 4s 轮询。 */
+  useEffect(() => {
+    if (!detail) return;
+    reloadTasks();
+  }, [detail?.task.lifecycle, detail?.task.phase, detail?.task.version, reloadTasks]);
 
   const refresh = useCallback(() => {
     state.reload();
@@ -265,11 +273,6 @@ export function App() {
           {tasks.length === 0 ? <div className="empty">还没有任务。<br />点击下方“新建任务”。</div> : null}
           {tasks.map((t) => (
             <div key={t.id} className={`task-row ${t.id === taskId ? 'active' : ''} ${TERMINAL.includes(t.lifecycle) ? '' : 'running'}`}>
-              {TERMINAL.includes(t.lifecycle) ? null : (
-                <svg className="run-border" aria-hidden="true">
-                  <rect x="0" y="0" width="100%" height="100%" rx="11" />
-                </svg>
-              )}
               <button
                 className="task-item"
                 onClick={() => {
@@ -280,6 +283,7 @@ export function App() {
               >
                 <span className="task-item-title">{t.title}</span>
                 <span className="task-item-meta">
+                  {TERMINAL.includes(t.lifecycle) ? null : <span className="task-live" aria-hidden="true" />}
                   <span className={`chip ${LIFECYCLE_TONE[t.lifecycle]}`}>{LIFECYCLE_LABEL[t.lifecycle]}</span>
                   <span>{PHASE_LABEL[t.phase]}</span>
                   <span className="mono">{clock(t.updatedAt)}</span>
@@ -311,11 +315,21 @@ export function App() {
               归档
             </button>
           </div>
-          <div className="row" style={{ justifyContent: 'space-between' }}>
+          <div className="row" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
             <span className={`chip ${state.conn === 'live' ? 'green' : state.conn === 'reconnecting' ? 'amber' : 'muted'}`}>
               <span className="dot" />
               {state.conn === 'live' ? '事件流已连接' : state.conn === 'reconnecting' ? '重连中' : '连接中'}
             </span>
+            <button
+              type="button"
+              className={`fx-btn ${effects ? 'on' : ''}`}
+              onClick={toggleEffects}
+              aria-pressed={effects}
+              title={`呼吸灯动效${effects ? '已开启' : '已关闭'}(点击切换); 画布上的 harness 连线始终显示`}
+            >
+              <span className="fx-dot" />
+              呼吸灯
+            </button>
           </div>
           {runtimeStatus?.exitOnUiClose ? (
             <p className="foot-note" title="关闭或刷新页面时浏览器会先确认; 确认关闭后后台进程会在约 2.5s 内结束, 刷新则不会。">

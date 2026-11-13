@@ -2470,26 +2470,28 @@ a.link:hover {
   z-index: 0;
 }
 
+/* 连线常驻: 静态态也是细虚线 + 箭头, 运行态才提亮并流动。 */
 .cy-wire-path {
   fill: none;
-  stroke-width: 1.3;
+  stroke-width: 1.15;
   stroke-linecap: round;
-  opacity: 0.42;
+  stroke-dasharray: 3 5;
+  opacity: 0.5;
   transition: opacity 0.2s ease;
 }
 
 .cy-wire-glow {
   fill: none;
-  stroke-width: 5;
-  opacity: 0.07;
+  stroke-width: 4.5;
+  opacity: 0.055;
   stroke-linecap: round;
 }
 
 .cy-wire g.active .cy-wire-path {
   opacity: 0.95;
   stroke-width: 1.6;
-  animation: cy-dash 1.6s linear infinite;
-  stroke-dasharray: 5 5;
+  stroke-dasharray: 6 5;
+  animation: cy-dash 1.4s linear infinite;
 }
 
 .cy-wire g.active .cy-wire-glow {
@@ -2702,7 +2704,7 @@ a.link:hover {
 
 @keyframes cy-dash {
   to {
-    stroke-dashoffset: -20;
+    stroke-dashoffset: -22;
   }
 }
 
@@ -3284,29 +3286,32 @@ table.grid tbody tr.rowclick:focus-visible { outline: 2px solid var(--accent); o
   filter: drop-shadow(0 6px 14px rgba(11, 10, 20, 0.45));
 }
 
-/* 运行中的任务: 细窄的同色流动虚线(参考 lancer 的 running border, 纯 CSS, 不动 React)。 */
-.run-border {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  pointer-events: none;
-  overflow: visible;
+/* 运行中的任务: 一颗呼吸灯, 纯 CSS, 不触发 React 渲染; 关掉动效时只留常亮小点。 */
+.task-live {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+  background: var(--ok);
+  box-shadow: 0 0 0 0 color-mix(in oklab, var(--ok) 40%, transparent);
+  animation: hh-breathe 2.4s ease-in-out infinite;
 }
 
-.run-border rect {
-  fill: none;
-  stroke: var(--accent);
-  stroke-width: 1.2;
-  stroke-dasharray: 9 91;
-  opacity: 0.8;
-  animation: hh-run 3.6s linear infinite;
-  filter: drop-shadow(0 0 2px var(--accent-soft));
+:root[data-effects='off'] .task-live {
+  animation: none;
+  opacity: 0.85;
+  box-shadow: 0 0 0 2px color-mix(in oklab, var(--ok) 18%, transparent);
 }
 
-@keyframes hh-run {
-  to {
-    stroke-dashoffset: -100;
+@keyframes hh-breathe {
+  0%,
+  100% {
+    opacity: 0.72;
+    box-shadow: 0 0 0 0 color-mix(in oklab, var(--ok) 42%, transparent);
+  }
+  50% {
+    opacity: 1;
+    box-shadow: 0 0 0 4.5px color-mix(in oklab, var(--ok) 0%, transparent);
   }
 }
 
@@ -3428,10 +3433,10 @@ table.grid tbody tr.rowclick:focus-visible { outline: 2px solid var(--accent); o
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .run-border rect {
+  .task-live {
     animation: none;
-    stroke-dasharray: none;
-    opacity: 0.45;
+    opacity: 0.85;
+    box-shadow: 0 0 0 2px color-mix(in oklab, var(--ok) 18%, transparent);
   }
   .dock-tab.active::after {
     animation: none;
@@ -3506,4 +3511,43 @@ table.grid tbody tr.rowclick:focus-visible { outline: 2px solid var(--accent); o
     height: 27px;
     border-radius: 8px;
   }
+}
+/* 侧栏底部的呼吸灯开关: 只影响任务行的灯, 不影响画布连线。 */
+.fx-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 7px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-3);
+  font-size: 10.5px;
+  line-height: 1.6;
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+
+.fx-btn:hover,
+.fx-btn:focus-visible {
+  color: var(--text-2);
+  border-color: var(--line-2);
+  background: var(--surface-2);
+}
+
+.fx-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--line-2);
+  flex: none;
+}
+
+.fx-btn.on {
+  color: var(--text-2);
+}
+
+.fx-btn.on .fx-dot {
+  background: var(--ok);
+  box-shadow: 0 0 0 2px color-mix(in oklab, var(--ok) 18%, transparent);
 }

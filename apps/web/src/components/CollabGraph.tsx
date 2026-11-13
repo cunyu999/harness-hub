@@ -126,33 +126,47 @@ export function CollabGraph({
       const out: Wire[] = [];
       const fromKey = lead ? `seat-${lead.key}` : null;
       const From = fromKey ? pos.get(fromKey) : null;
+      const plan = pos.get('plan-card') ?? null;
+      const deliver = pos.get('deliver-card') ?? null;
+
+
       if (fromKey && From) {
-        others.forEach((s) => {
+        others.forEach((s, i) => {
           const P = pos.get(`seat-${s.key}`);
           if (!P) return;
+          // 出口按序号均分主控卡底边, 进口落在子卡顶边中点: 多席位时是扇形, 不重叠。
+          const sx = From.x + (From.w * (i + 1)) / (others.length + 1);
           out.push({
             key: `${fromKey}->seat-${s.key}`,
-            d: curve(From.x + From.w / 2, From.y + From.h, P.x + P.w / 2, P.y),
+            d: curve(sx, From.y + From.h, P.x + P.w / 2, P.y),
             color: s.accent,
             active: s.tone === 'run' || (lead?.tone ?? 'idle') === 'run',
           });
         });
       }
 
-      if (hasDeliver) {
-        const D = pos.get('deliver-card');
-        if (D) {
-          others.forEach((s) => {
-            const P = pos.get(`seat-${s.key}`);
-            if (!P) return;
-            out.push({
-              key: `seat-${s.key}->deliver-card`,
-              d: curve(P.x + P.w / 2, P.y + P.h, D.x + D.w / 2, D.y),
-              color: s.accent,
-              active: s.tone === 'run',
-            });
+      if (hasDeliver && deliver) {
+        if (others.length === 0 && From) {
+          // 单席位任务: 主控直接落到交付节点, 保证图始终连通。
+          out.push({
+            key: 'lead->deliver-card',
+            d: curve(From.x + From.w / 2, From.y + From.h, deliver.x + deliver.w / 2, deliver.y),
+            color: 'var(--ok)',
+            active: lead?.tone === 'run',
           });
         }
+        others.forEach((s, i) => {
+          const P = pos.get(`seat-${s.key}`);
+          if (!P) return;
+          // 入口按序号均分交付卡顶边, 两条线不会挤在同一点。
+          const tx = deliver.x + (deliver.w * (i + 1)) / (others.length + 1);
+          out.push({
+            key: `seat-${s.key}->deliver-card`,
+            d: curve(P.x + P.w / 2, P.y + P.h, tx, deliver.y),
+            color: s.accent,
+            active: s.tone === 'run',
+          });
+        });
       }
 
       setWires((prev) => {
@@ -259,10 +273,23 @@ export function CollabGraph({
         <div className="cy-canvas" ref={canvasRef}>
           {box.w > 0 && wires.length > 0 ? (
             <svg className="cy-wire" width={box.w} height={box.h} viewBox={`0 0 ${box.w} ${box.h}`} aria-hidden="true">
+              <defs>
+                <marker
+                  id="cy-arrow"
+                  viewBox="0 0 8 8"
+                  refX="7.2"
+                  refY="4"
+                  markerWidth="7"
+                  markerHeight="7"
+                  orient="auto"
+                >
+                  <path d="M0.6 0.8 L7.2 4 L0.6 7.2 Z" fill="context-stroke" />
+                </marker>
+              </defs>
               {wires.map((w) => (
                 <g key={w.key} className={w.active ? 'active' : ''}>
                   <path d={w.d} className="cy-wire-glow" style={{ stroke: w.color }} />
-                  <path d={w.d} className="cy-wire-path" style={{ stroke: w.color }} />
+                  <path d={w.d} className="cy-wire-path" style={{ stroke: w.color }} markerEnd="url(#cy-arrow)" />
                   {w.active ? (
                     <circle r="2.4" className="cy-spark" style={{ fill: w.color }}>
                       <animateMotion dur="2.6s" repeatCount="indefinite" path={w.d} />
@@ -339,6 +366,7 @@ function curve(x1: number, y1: number, x2: number, y2: number): string {
   const c2 = y2 - gap * 0.55;
   return `M ${x1.toFixed(1)} ${y1.toFixed(1)} C ${x1.toFixed(1)} ${c1.toFixed(1)}, ${x2.toFixed(1)} ${c2.toFixed(1)}, ${x2.toFixed(1)} ${y2.toFixed(1)}`;
 }
+
 
 function stateColor(state: string): string {
   if (state === 'accepted') return 'var(--ok)';
